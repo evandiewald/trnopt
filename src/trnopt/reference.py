@@ -111,7 +111,11 @@ def highs_lp_to_lp(m: highspy.HighsLp, name: str = "lp") -> tuple[LP, float]:
 
 
 def solve_highs_mip(lp: LP, time_limit: float = 600.0, threads: int | None = None) -> ReferenceResult:
-    """HiGHS's full MIP solver (presolve, cuts, heuristics, branch-and-bound) on lp, honoring lp.integer."""
+    """HiGHS's full MIP solver (presolve, cuts, heuristics, branch-and-bound) on lp, honoring lp.integer.
+
+    threads: leave None unless this runs in its own process. HiGHS sizes one thread pool per process
+    with the first solver created, and any later solver asking for a different size fails ("Not Set").
+    """
     h = highspy.Highs()
     h.setOptionValue("output_flag", False)
     h.setOptionValue("time_limit", float(time_limit))

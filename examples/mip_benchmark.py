@@ -20,6 +20,8 @@ Writes results/mip_<host>_<date>.csv.
 
 import argparse
 import csv
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 import datetime as dt
 import os
 import platform
@@ -61,7 +63,10 @@ def main():
     rows = []
     for make in (QUICK if args.quick else DEFAULT):
         lp = make()
-        ref = solve_highs_mip(lp, args.time_limit, threads=cores)
+        # HiGHS's MIP solver gets all cores, in its own FRESH process ("spawn", not a fork that would
+        # inherit this process's HiGHS thread pool): HiGHS allows one thread-pool size per process.
+        with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as ex:
+            ref = ex.submit(solve_highs_mip, lp, args.time_limit, cores).result()
         print(f"\n{lp.name}: {lp.m} x {lp.n}, {lp.K.nnz} nonzeros, {int(lp.integer.sum())} integer variables")
         print(f"   {'HiGHS MIP solver (context)':30s} {ref.status:10s} obj {ref.objective:.6g}  {ref.seconds:7.1f} s")
         rows.append(dict(instance=lp.name, method="HiGHS MIP (all features)", status=ref.status,

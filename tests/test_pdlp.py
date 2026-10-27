@@ -485,3 +485,22 @@ def test_mip_matches_highs(branching):
         assert r.status == "optimal", (lp.name, r.status)
         assert abs(r.objective - ref.objective) <= 1e-6 * (1 + abs(ref.objective)), (lp.name, r.objective, ref.objective)
         assert r.gap <= 1e-4
+
+
+def test_mip_after_multithreaded_highs():
+    """HiGHS fixes its thread pool size with the first solver in a process and refuses ("Not Set") any
+    later solver that asks for a different size. Our node solver must work after HiGHS's MIP solver ran
+    multi-threaded (on a 10-core Mac the default is 5). Run in a fresh process so test order can't matter."""
+    import subprocess, sys
+    code = (
+        "from trnopt.generators import set_cover\n"
+        "from trnopt.mip import solve_mip\n"
+        "from trnopt.reference import solve_highs_mip\n"
+        "lp = set_cover(60, 120, 0.06, seed=5)\n"
+        "ref = solve_highs_mip(lp, 60, threads=4)\n"
+        "r = solve_mip(lp, 'most_fractional')\n"
+        "assert ref.status == 'Optimal', ref.status\n"
+        "assert r.status == 'optimal' and abs(r.objective - ref.objective) <= 1e-6 * (1 + abs(ref.objective))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, out.stderr[-2000:]

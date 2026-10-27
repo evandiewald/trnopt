@@ -81,15 +81,21 @@ class _NodeLP:
         self.h = highspy.Highs()
         self.h.setOptionValue("output_flag", False)
         self.h.setOptionValue("solver", "simplex")
-        self.h.setOptionValue("simplex_strategy", 1)      # dual simplex
-        self.h.setOptionValue("threads", 1)
+        self.h.setOptionValue("simplex_strategy", 1)      # dual simplex (single-threaded by nature)
+        # No "threads" option: HiGHS shares one thread pool per process, sized by the first solver
+        # created, and refuses to run (status "Not Set") if a later one asks for a different size.
+        # On a 2-core machine the default happened to be 1, so setting threads=1 worked; on a 10-core
+        # Mac, running HiGHS's MIP solver first (5 threads by default) made every node LP fail.
         self.h.passModel(to_highs_lp(lp))
-        self.idx = np.arange(lp.n, dtype=np.int32)
-        self.n = lp.n
+        self.cur_lo, self.cur_up = lp.lower.copy(), lp.upper.copy()
 
     def solve(self, lower, upper, basis=None):
         h = self.h
-        h.changeColsBounds(self.n, self.idx, _hinf(lower), _hinf(upper))
+        # Update only the columns whose bounds changed (usually one or a few per node).
+        changed = np.flatnonzero((lower != self.cur_lo) | (upper != self.cur_up))
+        for j in changed:
+            h.changeColBounds(int(j), _hval(lower[j]), _hval(upper[j]))
+        self.cur_lo[changed], self.cur_up[changed] = lower[changed], upper[changed]
         if basis is not None:
             h.setBasis(basis)
         h.run()
@@ -97,14 +103,21 @@ class _NodeLP:
         if st == highspy.HighsModelStatus.kInfeasible:
             return "infeasible", np.inf, None, None, None
         if st != highspy.HighsModelStatus.kOptimal:
-            return h.modelStatusToString(st), np.inf, None, None, None
+            # Anything else (model error, unbounded, not set...) is a bug or an unsupported model,
+            # not a branch to discard: fail loudly instead of reporting a wrong "infeasible".
+            raise RuntimeError(f"HiGHS returned '{h.modelStatusToString(st)}' for a node LP")
         sol = h.getSolution()
         return ("optimal", h.getInfo().objective_function_value, np.array(sol.col_value),
                 np.array(sol.row_dual), h.getBasis())
 
 
-def _hinf(v):
-    return np.where(np.isinf(v), np.sign(v) * highspy.kHighsInf, v)
+def _hval(v) -> float:
+    v = float(v)
+    if v == np.inf:
+        return highspy.kHighsInf
+    if v == -np.inf:
+        return -highspy.kHighsInf
+    return v
 
 
 # ---- strong branching with HiGHS, one child LP per task, all cores --------------------------
