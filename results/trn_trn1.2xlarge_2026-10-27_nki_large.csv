@@ -1,0 +1,9 @@
+B,backend,cols,instance,n_optimal,rows,sec_per_lp,seconds,section,us_per_iter,distinct_lps
+128,neuron-nki,36864,chromaticindex512-7.mps.gz,128,33791,0.04633,5.93,batch,,128
+128,cpu-float32,36864,chromaticindex512-7.mps.gz,128,33791,0.12087,15.471,batch,,128
+128,neuron-nki,10863,comp21-2idx.mps.gz,128,14038,0.04649,5.951,batch,,128
+128,cpu-float32,10863,comp21-2idx.mps.gz,128,14038,0.09741,12.468,batch,,128
+128,neuron-nki,33003,neos-4300652-rahue.mps.gz,128,76992,0.20238,25.904,batch,,128
+128,cpu-float32,33003,neos-4300652-rahue.mps.gz,128,76992,1.36596,174.843,batch,,128
+128,neuron-nki,31762,neos-933966.mps.gz,128,12047,0.0453,5.798,batch,,128
+128,cpu-float32,31762,neos-933966.mps.gz,128,12047,0.08463,10.832,batch,,128

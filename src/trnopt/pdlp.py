@@ -55,6 +55,7 @@ hybrid gradient for large-scale linear programming" (2021); Lu & Yang, "cuPDLP.j
 from __future__ import annotations
 
 import math
+from functools import partial
 import time
 from dataclasses import dataclass, field, replace
 
@@ -196,6 +197,9 @@ class _Problem:
         self.upper = be.tensor(lp.upper / self.d_c)
         self.dr = be.tensor(self.d_r)
         self.dc = be.tensor(self.d_c)
+        # Multiply by reciprocals rather than divide (a Neuron compiler bug, see batch._Ctx).
+        self.inv_dr = be.tensor(1.0 / self.d_r)
+        self.inv_dc = be.tensor(1.0 / self.d_c)
         self.n, self.m = lp.n, lp.m
         ineq = np.zeros(lp.m, dtype=bool)
         ineq[lp.m_eq :] = True
@@ -211,9 +215,12 @@ class _Problem:
         self.c_scaled_max = float(np.abs(lp.c * self.d_c).max(initial=0.0))
         self.q_scaled_max = float(np.abs(lp.q * self.d_r).max(initial=0.0))
 
-        compile_ = (lambda f: torch.compile(f, backend=be.compile_backend or "inductor")) if be.compile else (lambda f: f)
-        self.step = compile_(self._step)
-        self.eval_stats = compile_(self._eval_stats)
+        # Compile the plain functions (once per process, cached in Backend.compile_fn) and pass this
+        # problem in as an argument. Compiling the bound methods instead gave every solve its own
+        # cache entry, and every call checked all of them: per-iteration time grew with the number
+        # of solves in the process (249 -> 9,027 us/iteration across 5 problems on trn1).
+        self.step = partial(be.compile_fn(_Problem._step), self)
+        self.eval_stats = partial(be.compile_fn(_Problem._eval_stats), self)
 
     # ---- the core PDHG iteration -----------------------------------------------------
     def _step(self, x, y, Kx, KTy, x_sum, y_sum, tau, sigma):
@@ -274,7 +281,7 @@ class _Problem:
         dobj = (torch.dot(self.q, y) + torch.dot(torch.where(near_lo, self.lower_or_0, 0.0), r_pos)
                 - torch.dot(torch.where(near_up, self.upper_or_0, 0.0), r_neg))
         return torch.stack([
-            torch.linalg.norm(viol / self.dr), torch.linalg.norm(dual_viol / self.dc),
+            torch.linalg.norm(viol * self.inv_dr), torch.linalg.norm(dual_viol * self.inv_dc),
             torch.linalg.norm(viol), torch.linalg.norm(dual_viol),
             pobj, dobj,
         ])

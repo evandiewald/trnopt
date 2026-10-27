@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from functools import partial
 
 import numpy as np
 import scipy.sparse as sp
@@ -214,7 +215,7 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         1e-8 if be.dtype == torch.float64 else 1e-4)
 
     def proj_dual(y):
-        return torch.where(ineq, torch.clamp(y, min=0.0), y)
+        return _proj_dual(ineq, y)
 
     # ---- per-slot device state, (n, B) / (m, B); empty slots hold zeros and stay frozen ------
     zn = lambda: torch.zeros(n, B, dtype=be.dtype, device=be.device)
@@ -248,61 +249,10 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
     R_x, R_y = np.zeros((N, n)), np.zeros((N, m))
     next_lp = 0
 
-    # ---- the iteration: identical to single-LP PDHG, on n x B matrices -----------------------
-    def step(x, y, Kx, KTy, x_sum, y_sum, n_avg, tau, sigma, active, c_t, q_t, lo_t, up_t):
-        x_new = torch.clamp(x - tau * (c_t - KTy), lo_t, up_t)
-        Kx_new = mv.K(x_new)
-        y_new = proj_dual(y + sigma * (q_t - (2.0 * Kx_new - Kx)))
-        KTy_new = mv.KT(y_new)
-        # Frozen (finished or empty) slots keep their values: same shapes every iteration.
-        x_new = torch.where(active, x_new, x)
-        y_new = torch.where(active, y_new, y)
-        Kx_new = torch.where(active, Kx_new, Kx)
-        KTy_new = torch.where(active, KTy_new, KTy)
-        a = active.to(x.dtype)
-        return x_new, y_new, Kx_new, KTy_new, x_sum + a * x_new, y_sum + a * y_new, n_avg + a
-
-    # ---- per-slot measurements, all returned in one (23, B) tensor ---------------------------
-    def point_stats(x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0):
-        resid = Kx - q_t
-        viol = torch.where(ineq, torch.clamp(-resid, min=0.0), resid)
-        r = c_t - KTy
-        rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
-        # Bounds get credit for a reduced cost only when x is near them (see pdlp._Problem.point_stats).
-        near_lo = lo_fin & (torch.abs(x - lo0) <= torch.abs(x))
-        near_up = up_fin & (torch.abs(x - up0) <= torch.abs(x))
-        dviol = torch.where(near_lo, 0.0, rp) + torch.where(near_up, 0.0, rn)
-        pobj = (c_t * x).sum(0)
-        dobj = (q_t * y).sum(0) + (torch.where(near_lo, lo0, 0.0) * rp).sum(0) - (torch.where(near_up, up0, 0.0) * rn).sum(0)
-        nrm = lambda v: torch.linalg.norm(v, dim=0)
-        return torch.stack([nrm(viol / dr_t), nrm(dviol / dc_t), nrm(viol), nrm(dviol), pobj, dobj])
-
-    def ray_stats(dx, dy, pdx, pdy, x, y, c_t, q_t, lo_fin, up_fin, lo0, up0):
-        dray = proj_dual(dy)
-        r = -mv.KT(dray)
-        rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
-        bad = torch.where(lo_fin, 0.0, rp) + torch.where(up_fin, 0.0, rn)
-        dobj = (q_t * dray).sum(0) + (lo0 * rp).sum(0) - (up0 * rn).sum(0)
-        pray = torch.where(lo_fin, torch.clamp(dx, min=0.0), dx)
-        pray = torch.where(up_fin, torch.clamp(pray, max=0.0), pray)
-        Kr = mv.K(pray)
-        viol = torch.where(ineq, torch.clamp(-Kr, min=0.0), Kr)
-        nrm = lambda v: torch.linalg.norm(v, dim=0)
-        cos = lambda a, b: (a * b).sum(0) / (nrm(a) * nrm(b) + 1e-30)    # drift steadiness (see pdlp.py)
-        xfree = torch.where(lo_fin & up_fin, 0.0, torch.abs(x)).amax(0)
-        ymax = torch.abs(y).amax(0) if m else torch.zeros(B, dtype=x.dtype, device=x.device)
-        return torch.stack([nrm(dray), dobj, nrm(bad), nrm(pray), (c_t * pray).sum(0), nrm(viol),
-                            cos(dy, pdy), cos(dx, pdx), xfree, ymax])
-
-    def eval_stats(x, y, Kx, KTy, xa, ya, Kxa, KTya, dx, dy, pdx, pdy, c_t, q_t, lo_fin, up_fin, lo0, up0):
-        d = (c_t, q_t, lo_fin, up_fin, lo0, up0)
-        finite = (torch.isfinite(x).all(0) & torch.isfinite(y).all(0)).to(x.dtype)[None, :]
-        return torch.cat([finite, point_stats(x, y, Kx, KTy, *d), point_stats(xa, ya, Kxa, KTya, *d),
-                          ray_stats(dx, dy, pdx, pdy, x, y, *d)])
-
-    if be.compile:
-        step = torch.compile(step, backend=be.compile_backend or "inductor")
-        eval_stats = torch.compile(eval_stats, backend=be.compile_backend or "inductor")
+    # ---- the iteration and the measurements: module-level functions, compiled once per process ----
+    ctx = _Ctx(mv=mv, ineq=ineq, dr_t=dr_t, dc_t=dc_t, inv_dr_t=T(1.0 / d_r)[:, None], inv_dc_t=T(1.0 / d_c)[:, None])
+    step = partial(be.compile_fn(_step), ctx)
+    eval_stats = partial(be.compile_fn(_eval_stats), ctx)
 
     def mask_t(mask_np):
         return torch.as_tensor(mask_np, device=be.device)[None, :]
@@ -357,7 +307,7 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         q_norm[slot_idx] = np.linalg.norm(Q[:, slot_idx], axis=0)
         c_smax[slot_idx] = np.abs(Cs).max(axis=0, initial=0.0)
         q_smax[slot_idx] = np.abs(Qs).max(axis=0, initial=0.0)
-        st0 = point_stats(x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0).cpu().double().numpy()
+        st0 = _point_stats(ctx, x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0).cpu().double().numpy()
         best_st[:, slot_idx] = st0[:, slot_idx]
         kkt_last[slot_idx] = kkt(st0[:, slot_idx], omega[slot_idx])
         kkt_prev[slot_idx] = np.inf
@@ -507,6 +457,87 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         primal_residual=R_rp, dual_residual=R_rd, gap=R_gap, total_iterations=it,
         seconds=time.perf_counter() - t0, useful_work=float(R_it.sum() / (B * total)), omega=R_omega,
     )
+
+
+# ---- device code: one PDHG iteration and the per-slot measurements ------------------------------
+#
+# Module-level functions taking the problem's tensors through `ctx`, rather than closures made
+# inside each solve: torch.compile caches compiled code per function and guards on what it
+# captured. A fresh closure per solve meant a fresh cache entry per solve, and every call then
+# checked all of them, so a long-lived process (a MIP search, a benchmark) got slower with every
+# LP. With `ctx` as an argument, solves with the same shapes share one compiled graph.
+
+@dataclass(eq=False)
+class _Ctx:
+    mv: MatVec
+    ineq: torch.Tensor          # (m, 1) True on ">=" rows
+    dr_t: torch.Tensor          # (m, 1) row scaling
+    dc_t: torch.Tensor          # (n, 1) column scaling
+    # Reciprocals, so the stats multiply instead of divide. torch.compile's Neuron backend computed
+    # norm(v / d, dim=0) wrong (up to 40% in 240 of 624 columns, at v (1000, 624), d (1000, 1));
+    # norm(v * (1 / d)) is right. See examples/neuron_norm_bug_repro.py.
+    inv_dr_t: torch.Tensor
+    inv_dc_t: torch.Tensor
+
+
+def _proj_dual(ineq, y):
+    return torch.where(ineq, torch.clamp(y, min=0.0), y)
+
+
+def _step(ctx, x, y, Kx, KTy, x_sum, y_sum, n_avg, tau, sigma, active, c_t, q_t, lo_t, up_t):
+    """The iteration: identical to single-LP PDHG, on n x B matrices."""
+    x_new = torch.clamp(x - tau * (c_t - KTy), lo_t, up_t)
+    Kx_new = ctx.mv.K(x_new)
+    y_new = _proj_dual(ctx.ineq, y + sigma * (q_t - (2.0 * Kx_new - Kx)))
+    KTy_new = ctx.mv.KT(y_new)
+    # Frozen (finished or empty) slots keep their values: same shapes every iteration.
+    x_new = torch.where(active, x_new, x)
+    y_new = torch.where(active, y_new, y)
+    Kx_new = torch.where(active, Kx_new, Kx)
+    KTy_new = torch.where(active, KTy_new, KTy)
+    a = active.to(x.dtype)
+    return x_new, y_new, Kx_new, KTy_new, x_sum + a * x_new, y_sum + a * y_new, n_avg + a
+
+
+def _point_stats(ctx, x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0):
+    resid = Kx - q_t
+    viol = torch.where(ctx.ineq, torch.clamp(-resid, min=0.0), resid)
+    r = c_t - KTy
+    rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
+    # Bounds get credit for a reduced cost only when x is near them (see pdlp._Problem.point_stats).
+    near_lo = lo_fin & (torch.abs(x - lo0) <= torch.abs(x))
+    near_up = up_fin & (torch.abs(x - up0) <= torch.abs(x))
+    dviol = torch.where(near_lo, 0.0, rp) + torch.where(near_up, 0.0, rn)
+    pobj = (c_t * x).sum(0)
+    dobj = (q_t * y).sum(0) + (torch.where(near_lo, lo0, 0.0) * rp).sum(0) - (torch.where(near_up, up0, 0.0) * rn).sum(0)
+    nrm = lambda v: torch.linalg.norm(v, dim=0)
+    return torch.stack([nrm(viol * ctx.inv_dr_t), nrm(dviol * ctx.inv_dc_t), nrm(viol), nrm(dviol), pobj, dobj])
+
+
+def _ray_stats(ctx, dx, dy, pdx, pdy, x, y, c_t, q_t, lo_fin, up_fin, lo0, up0):
+    dray = _proj_dual(ctx.ineq, dy)
+    r = -ctx.mv.KT(dray)
+    rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
+    bad = torch.where(lo_fin, 0.0, rp) + torch.where(up_fin, 0.0, rn)
+    dobj = (q_t * dray).sum(0) + (lo0 * rp).sum(0) - (up0 * rn).sum(0)
+    pray = torch.where(lo_fin, torch.clamp(dx, min=0.0), dx)
+    pray = torch.where(up_fin, torch.clamp(pray, max=0.0), pray)
+    Kr = ctx.mv.K(pray)
+    viol = torch.where(ctx.ineq, torch.clamp(-Kr, min=0.0), Kr)
+    nrm = lambda v: torch.linalg.norm(v, dim=0)
+    cos = lambda a, b: (a * b).sum(0) / (nrm(a) * nrm(b) + 1e-30)    # drift steadiness (see pdlp.py)
+    xfree = torch.where(lo_fin & up_fin, 0.0, torch.abs(x)).amax(0)
+    ymax = torch.abs(y).amax(0) if y.shape[0] else torch.zeros(x.shape[1], dtype=x.dtype, device=x.device)
+    return torch.stack([nrm(dray), dobj, nrm(bad), nrm(pray), (c_t * pray).sum(0), nrm(viol),
+                        cos(dy, pdy), cos(dx, pdx), xfree, ymax])
+
+
+def _eval_stats(ctx, x, y, Kx, KTy, xa, ya, Kxa, KTya, dx, dy, pdx, pdy, c_t, q_t, lo_fin, up_fin, lo0, up0):
+    """Per-slot measurements, all returned in one (23, B) tensor."""
+    d = (c_t, q_t, lo_fin, up_fin, lo0, up0)
+    finite = (torch.isfinite(x).all(0) & torch.isfinite(y).all(0)).to(x.dtype)[None, :]
+    return torch.cat([finite, _point_stats(ctx, x, y, Kx, KTy, *d), _point_stats(ctx, xa, ya, Kxa, KTya, *d),
+                      _ray_stats(ctx, dx, dy, pdx, pdy, x, y, *d)])
 
 
 def _scatter_cols(length: int, B: int, slot_idx: np.ndarray, rows: np.ndarray) -> np.ndarray:

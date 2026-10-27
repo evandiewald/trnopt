@@ -1,0 +1,17 @@
+B,backend,cols,instance,n_optimal,rows,sec_per_lp,seconds,section,us_per_iter,distinct_lps
+128,neuron,1533,neos-4954672-berkel.mps.gz,128,1848,0.01353,1.732,batch,,128
+256,neuron,1533,neos-4954672-berkel.mps.gz,256,1848,0.00982,2.513,batch,,256
+512,neuron,1533,neos-4954672-berkel.mps.gz,512,1848,0.00927,4.747,batch,,512
+1024,neuron,1533,neos-4954672-berkel.mps.gz,1024,1848,0.00876,8.974,batch,,1024
+128,cpu-float32,1533,neos-4954672-berkel.mps.gz,128,1848,0.02283,2.922,batch,,128
+256,cpu-float32,1533,neos-4954672-berkel.mps.gz,256,1848,0.02336,5.981,batch,,256
+512,cpu-float32,1533,neos-4954672-berkel.mps.gz,512,1848,0.02998,15.351,batch,,512
+1024,cpu-float32,1533,neos-4954672-berkel.mps.gz,1024,1848,0.03377,34.586,batch,,1024
+128,neuron,5868,nu25-pr12.mps.gz,128,2313,0.0391,5.005,batch,,128
+256,neuron,5868,nu25-pr12.mps.gz,256,2313,0.03374,8.637,batch,,256
+512,neuron,5868,nu25-pr12.mps.gz,512,2313,0.03712,19.005,batch,,512
+1024,neuron,5868,nu25-pr12.mps.gz,1024,2313,0.0363,37.169,batch,,530
+128,cpu-float32,5868,nu25-pr12.mps.gz,128,2313,0.06592,8.437,batch,,128
+256,cpu-float32,5868,nu25-pr12.mps.gz,251,2313,0.2624,67.175,batch,,256
+512,cpu-float32,5868,nu25-pr12.mps.gz,507,2313,0.29319,150.113,batch,,512
+1024,cpu-float32,5868,nu25-pr12.mps.gz,1014,2313,0.29335,300.389,batch,,530

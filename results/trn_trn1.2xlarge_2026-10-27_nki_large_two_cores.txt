@@ -1,0 +1,8 @@
+chromaticindex512-7.mps.gz spmv=nki B=1024 cores=1 distinct=1024: 38.15 s wall, 0.03726 s/LP, 1024/1024 optimal
+chromaticindex512-7.mps.gz spmv=nki B=1024 cores=2 distinct=1024: 19.53 s wall, 0.01907 s/LP, 1024/1024 optimal
+comp21-2idx.mps.gz spmv=nki B=1024 cores=1 distinct=1024: 29.90 s wall, 0.02920 s/LP, 1024/1024 optimal
+comp21-2idx.mps.gz spmv=nki B=1024 cores=2 distinct=1024: 16.92 s wall, 0.01652 s/LP, 1024/1024 optimal
+neos-933966.mps.gz spmv=nki B=1024 cores=1 distinct=1024: 32.40 s wall, 0.03164 s/LP, 1024/1024 optimal
+neos-933966.mps.gz spmv=nki B=1024 cores=2 distinct=1024: 17.16 s wall, 0.01676 s/LP, 1024/1024 optimal
+neos-4300652-rahue.mps.gz spmv=nki B=1024 cores=1 distinct=1024: 156.87 s wall, 0.15319 s/LP, 1024/1024 optimal
+neos-4300652-rahue.mps.gz spmv=nki B=1024 cores=2 distinct=1024: 81.60 s wall, 0.07968 s/LP, 1024/1024 optimal

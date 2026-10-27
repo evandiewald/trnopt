@@ -2,7 +2,7 @@
 
     uv run trnopt-bench                                         # Netlib + synthetic, CPU float64
     uv run trnopt-bench --backends cpu emulate-neuron --finish-float64
-    uv run trnopt-bench --backends neuron-xla --hardware trn1.2xlarge --price-per-hour 1.344 --out trn1.csv
+    trnopt-bench --backends neuron --hardware trn1.2xlarge --price-per-hour 1.344 --out trn1.csv
     uv run trnopt-bench --instances path/to/miplib/*.mps --time-limit 300
 
 Every row records what was run, on what, with which software versions, so results from
@@ -52,7 +52,7 @@ FIELDS = [
 
 def _versions() -> str:
     out = []
-    for pkg in ("trnopt", "torch", "torch-xla", "torch-neuronx", "highspy", "numpy", "scipy"):
+    for pkg in ("trnopt", "torch", "torch-neuronx", "nki", "highspy", "numpy", "scipy"):
         try:
             out.append(f"{pkg}={metadata.version(pkg)}")
         except metadata.PackageNotFoundError:

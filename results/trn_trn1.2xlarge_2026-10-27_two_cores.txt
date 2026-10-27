@@ -1,0 +1,4 @@
+nu25-pr12.mps.gz B=1024 cores=1 distinct=530: 37.11 s wall, 0.03624 s/LP, 1024/1024 optimal
+nu25-pr12.mps.gz B=1024 cores=2 distinct=530: 19.14 s wall, 0.01869 s/LP, 1024/1024 optimal
+neos-4954672-berkel.mps.gz B=1024 cores=1 distinct=1024: 8.89 s wall, 0.00868 s/LP, 1024/1024 optimal
+neos-4954672-berkel.mps.gz B=1024 cores=2 distinct=1024: 4.89 s wall, 0.00478 s/LP, 1024/1024 optimal

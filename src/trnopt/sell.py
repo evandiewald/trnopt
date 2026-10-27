@@ -13,6 +13,7 @@ The layout
    A budget constraint touching every variable would otherwise force huge padding.
 2. Sort pseudo-rows by length, longest first, and group them into slices of 128. 128 is the
    number of partitions (parallel lanes) in Trainium's on-chip memory: one lane per row.
+
 3. Within a slice, pad each row to the slice's longest row. Store two tables of shape
    (128, total width): column indices (padding points at an all-zero row of x) and values.
 

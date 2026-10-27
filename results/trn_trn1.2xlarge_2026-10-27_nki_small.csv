@@ -1,0 +1,5 @@
+B,backend,cols,instance,n_optimal,rows,sec_per_lp,seconds,section,us_per_iter,distinct_lps
+128,neuron-nki,1533,neos-4954672-berkel.mps.gz,128,1848,0.02692,3.446,batch,,128
+1024,neuron-nki,1533,neos-4954672-berkel.mps.gz,1024,1848,0.00892,9.132,batch,,1024
+128,neuron-nki,5868,nu25-pr12.mps.gz,128,2313,0.04914,6.29,batch,,128
+1024,neuron-nki,5868,nu25-pr12.mps.gz,1024,2313,0.03268,33.465,batch,,530

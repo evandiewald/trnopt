@@ -18,6 +18,7 @@ Methods, all solving the same LPs:
                      baseline (the paper makes the same point about earlier GPU work).
   * trnopt CPU     : batched PDLP, float32, 128 LPs at a time, warm-started from the root solution.
   * trnopt GPU     : the same on the Mac GPU with the Metal kernel (if available).
+  * trnopt trn1    : the same on one Trainium NeuronCore, sparse K through the NKI kernel (--methods neuron-nki).
 
 Reported: wall seconds for ALL the LPs, objective error vs HiGHS, and how good the variable chosen
 from our scores is when judged by exact scores (1.0 = as good as the best; symmetric instances
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import multiprocessing
 import datetime as dt
 import os
 import platform
@@ -48,6 +50,13 @@ from trnopt.reference import to_highs_lp
 
 ROOT = Path(__file__).resolve().parent.parent
 TOL = 1e-4
+# --methods name -> (label, backend factory)
+METHODS = {
+    "cpu-float32": ("trnopt CPU", lambda: Backend.preset("cpu-float32")),
+    "mps-metal": ("trnopt GPU", lambda: Backend.preset("mps-metal")),
+    "neuron-nki": ("trnopt trn1 NKI", lambda: Backend.preset("neuron", spmv="nki", dense=False)),
+    "neuron": ("trnopt trn1 dense", lambda: Backend.preset("neuron")),
+}
 
 # ---- HiGHS, warm-started, in worker processes ------------------------------------------------
 _H = None
@@ -179,14 +188,20 @@ def main():
     ap.add_argument("--max-candidates", type=int, default=1000,
                     help="fractional variables to branch on (2 LPs each); the paper used all of them")
     ap.add_argument("--slots", type=int, default=128)
+    ap.add_argument("--chip-slots", type=int, default=None,
+                    help="batch size for the Trainium methods (default: --slots); the chip wants bigger batches than CPUs")
+    ap.add_argument("--methods", nargs="+", default=None, choices=list(METHODS),
+                    help="trnopt variants to run (default: cpu-float32, plus mps-metal on a Mac)")
+    ap.add_argument("--host", default=None, help="label for the machine in the CSV name, e.g. trn1.2xlarge")
     args = ap.parse_args()
     workers = os.cpu_count() or 1
     gpu = torch.backends.mps.is_available()
     host = (subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip()
             if platform.system() == "Darwin" else platform.node()) or "host"
+    host = args.host or host
     print(f"host: {host}   CPU workers for HiGHS: {workers}   Mac GPU: {gpu}   torch {torch.__version__}")
     rows = []
-    methods = [("trnopt CPU", "cpu-float32")] + ([("trnopt GPU", "mps-metal")] if gpu else [])
+    methods = [(METHODS[m][0], m) for m in (args.methods or (["cpu-float32"] + (["mps-metal"] if gpu else [])))]
 
     for name in args.instances or default_instances(args.quick, args.all):
         lp = load_instance(name)
@@ -202,7 +217,9 @@ def main():
 
         # HiGHS warm, all LPs, all cores.
         t = time.perf_counter()
-        with ProcessPoolExecutor(workers, initializer=_worker_init, initargs=(lp, bcols, brows)) as ex:
+        # spawn, not fork: a forked worker would inherit this process's accelerator runtime and HiGHS state.
+        with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"),
+                                 initializer=_worker_init, initargs=(lp, bcols, brows)) as ex:
             out = list(ex.map(_warm_solve, tasks, chunksize=max(1, N // (4 * workers))))
         warm_wall = time.perf_counter() - t
         ref_obj = np.array([o for _, _, o in out])
@@ -230,8 +247,8 @@ def main():
         # trnopt, warm-started from its own root solution.
         root = solve_pdlp(lp, PDLPOptions(tol=TOL, backend=Backend.preset("cpu-float32"), time_limit=300))
         for label, preset in methods:
-            opts = PDLPOptions(tol=TOL, backend=Backend.preset(preset), time_limit=3600)
-            B = min(args.slots, N)
+            opts = PDLPOptions(tol=TOL, backend=METHODS[preset][1](), time_limit=3600)
+            B = min(args.chip_slots if (args.chip_slots and preset.startswith("neuron")) else args.slots, N)
             solve_pdlp_stream(lp, B, B, lower=L, upper=U, x0=root.x, y0=root.y,
                               opts=PDLPOptions(tol=TOL, backend=opts.backend, max_iters=64))   # warm-up
             t = time.perf_counter()

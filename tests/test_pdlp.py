@@ -3,6 +3,7 @@
 "cpu"            -- the reference: float64, sparse K
 "cpu-float32"    -- isolates the effect of float32 precision alone
 "emulate-neuron" -- Trainium's restrictions (float32, dense K) on the CPU
+"neuron"         -- the real chip (TorchNeuron); added automatically when a NeuronCore is present
 
 Float32 backends get looser tolerances: about 7 significant digits is all float32 has.
 """
@@ -24,6 +25,20 @@ BACKENDS = {
     "cpu-float32": (Backend.preset("cpu", dtype=torch.float32), 1e-4, 1e-3),
     "emulate-neuron": (Backend.preset("emulate-neuron", compile=False), 1e-4, 1e-3),
 }
+
+
+def _neuron_device_present() -> bool:
+    try:
+        import torch_neuronx  # noqa: F401  (registers the "neuron" device)
+        return torch.neuron.device_count() > 0
+    except Exception:
+        return False
+
+
+HAVE_NEURON = _neuron_device_present()
+needs_neuron = pytest.mark.skipif(not HAVE_NEURON, reason="no NeuronCore on this machine")
+if HAVE_NEURON:
+    BACKENDS["neuron"] = (Backend.preset("neuron"), 1e-4, 1e-3)
 
 
 def rel_err(a: float, b: float) -> float:
@@ -179,7 +194,7 @@ def test_float64_finish_is_noop_for_float64():
     assert res.status == "optimal" and res.finish_iterations == 0
 
 
-# ---- the XLA path used on trn1 (runs only where torch_xla is installed) ----------------------------
+# ---- the legacy PyTorch/XLA path (torch-neuronx <= 2.9; runs only where torch_xla is installed) ---
 
 def test_xla_backend():
     import os
@@ -230,7 +245,7 @@ def test_sell_auto_split_cuts_padding():
 
 
 def test_nki_kernel_in_simulator():
-    pytest.importorskip("neuronxcc")
+    pytest.importorskip("nki")
     import scipy.sparse as sp
     from trnopt.nki_sell import sell_matmul_simulated
     from trnopt.sell import build_sell
@@ -243,12 +258,37 @@ def test_nki_kernel_in_simulator():
 
 def test_solver_with_simulated_nki_kernel():
     """Every multiply through the simulated NKI kernel: same answer as the PyTorch path."""
-    pytest.importorskip("neuronxcc")
+    pytest.importorskip("nki")
     lp = textbook()
     ref = solve_pdlp(lp, PDLPOptions(tol=1e-4, backend=Backend.preset("cpu-float32")))
     res = solve_pdlp(lp, PDLPOptions(tol=1e-4, backend=Backend.preset("cpu-float32", spmv="nki-sim")))
     assert res.status == "optimal" and res.iterations == ref.iterations
     assert res.objective == pytest.approx(ref.objective, rel=1e-5)
+
+
+@needs_neuron
+def test_nki_kernel_on_device():
+    """The same kernel on a real NeuronCore, single vector and batched."""
+    import scipy.sparse as sp
+    from trnopt.sell import build_sell
+    K = sp.random(300, 500, density=0.02, random_state=1, format="csr")
+    mv = MatVec(K, Backend.preset("neuron", spmv="nki"))
+    for X in (np.random.default_rng(0).normal(size=500), np.random.default_rng(1).normal(size=(500, 4))):
+        Y = mv.K(torch.as_tensor(X, dtype=torch.float32, device="neuron")).cpu().numpy()
+        ref = K @ X
+        assert np.abs(Y - ref).max() / np.abs(ref).max() < 1e-5
+        YT = mv.KT(torch.as_tensor(K @ X, dtype=torch.float32, device="neuron")).cpu().numpy()
+        refT = K.T @ (K @ X)
+        assert np.abs(YT - refT).max() / np.abs(refT).max() < 1e-5
+
+
+@needs_neuron
+def test_solver_with_nki_kernel_on_device():
+    """Every multiply through the NKI kernel on the chip: same answer as HiGHS."""
+    lp = load_mps(str(DATA / "afiro.mps"))
+    res = solve_pdlp(lp, PDLPOptions(tol=1e-4, backend=Backend.preset("neuron", spmv="nki", dense=False)))
+    assert res.status == "optimal"
+    assert rel_err(res.objective, solve_highs(lp).objective) < 1e-3
 
 
 # ---- batched solving --------------------------------------------------------------------------------
@@ -318,7 +358,7 @@ def test_batch_rejects_bad_shapes():
 
 def test_batch_with_simulated_nki_kernel():
     """The batched solver with every multiply through the simulated NKI kernel (X is n x B)."""
-    pytest.importorskip("neuronxcc")
+    pytest.importorskip("nki")
     from trnopt.batch import solve_pdlp_batch
     from trnopt.problems import return_scenarios
     lp = loan_selection(150)
