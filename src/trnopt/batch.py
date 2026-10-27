@@ -1,0 +1,516 @@
+"""Batched PDLP: solve many related LPs at once, as columns of one set of matrices.
+
+Why batch
+---------
+A MIP search produces many LPs that differ only slightly: same constraint matrix K, with one or
+two variable bounds changed ("loan 7 forced to 0" / "loan 7 forced to 1"). Solved one at a time,
+every iteration multiplies K by a single vector, a memory-bound operation that leaves an
+accelerator's matrix engine idle. Stack B such LPs as the columns of X (n x B), and the same
+iteration multiplies K by a matrix: B times the useful arithmetic for every byte of K read.
+On Trainium that's the difference between idling and using the hardware:
+* with dense storage, K @ X is a real matrix-matrix product, the Tensor engine's specialty;
+* with the sparse NKI kernel, each gather fetches a contiguous row of B values, not 1.
+
+What's shared and what isn't
+----------------------------
+Shared (depends only on K): scaling, step size, the matrix itself.
+Per LP (one column each): bounds, objective, right-hand side, primal weight omega, restart
+decisions, convergence, infeasibility verdicts.
+
+Continuous batching
+-------------------
+LPs finish at different iterations. Rather than waiting for the slowest one, `solve_pdlp_stream`
+keeps a queue: whenever a slot's LP finishes, the next LP from the queue is loaded into that
+slot (the same trick LLM servers call "continuous batching"). A fixed batch
+(`solve_pdlp_batch`) is just the special case where the queue holds exactly B LPs.
+
+Fixed shapes, fixed programs
+----------------------------
+On Trainium every new tensor shape means a recompile, and so does every new *sequence* of
+operations. So:
+* slots never disappear: a finished slot with nothing left to load is frozen (the iteration
+  still computes it, then a mask keeps the old value);
+* refills never index into tensors by slot number (`c[:, [3, 7]] = ...` would be a different
+  program for every number of slots refilled at once). Instead the host builds a full-width
+  update plus a slot mask, and the device applies it with one fixed-shape `where`.
+
+Each LP sees its own iteration count ("age") for restarts, warm-up and limits. Refills happen
+only at evaluation points, so every LP is evaluated at the same ages it would be if solved
+alone, and its result matches a single solve exactly.
+
+float64 finish
+--------------
+With `finish_float64=True` on a float32 backend, each slot watches its own LP for a precision
+stall (same rule as the single-LP solver). A stalled LP leaves its slot, which refills from the
+queue at once. Stalled LPs, plus any that use up `max_iters` on the device, are then finished
+in float64 on the CPU, in a second batched stream, warm-started from the device's answer and
+keeping each LP's learned primal weight.
+
+So with the finish on, `max_iters` is the device's per-LP budget. The stall rule is deliberately
+conservative: some problems (MIPLIB's neos-3627168-kasai) plateau for long stretches in float64
+as well as float32, and an eager rule would hand them to the CPU in the middle of normal
+progress.
+
+Not supported in batch mode (yet): presolve (it would give each LP a different K).
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, replace
+
+import numpy as np
+import scipy.sparse as sp
+import torch
+
+from .backend import Backend, MatVec
+from .lp import LP
+from .pdlp import (INFEAS_STREAK, INFEAS_WARMUP, RAY_COS, STALL_FRACTION, STALL_GATE, PDLPOptions,
+                   _operator_norm, _scale)
+
+
+@dataclass
+class BatchResult:
+    status: list[str]            # per LP: "optimal", "infeasible", "unbounded", "iteration_limit", ...
+    objective: np.ndarray        # (N,)
+    x: np.ndarray                # (N, n)
+    y: np.ndarray                # (N, m)
+    iterations: np.ndarray       # (N,) iterations each LP ran (its own count, from when it was loaded)
+    restarts: np.ndarray         # (N,)
+    primal_residual: np.ndarray  # (N,) relative
+    dual_residual: np.ndarray    # (N,) relative
+    gap: np.ndarray              # (N,) relative
+    total_iterations: int        # batch iterations actually run
+    seconds: float
+    useful_work: float           # sum of per-LP iterations / (slots * total_iterations), device phase
+    finish_iterations: np.ndarray | None = None   # (N,) of `iterations`, how many ran in the float64 CPU finish
+    omega: np.ndarray | None = None               # (N,) final primal weight per LP (for warm starts)
+
+
+def _rows(values, N: int, length: int, default: np.ndarray, what: str):
+    """Normalize a per-LP argument. Returns get(ids) -> array (len(ids), length).
+
+    None -> lp's own data for every LP; shape (length,) -> the same for every LP;
+    shape (N, length) -> one row per LP; or a function ids -> (len(ids), length) array, which
+    builds rows on demand (e.g. thousands of strong-branching bounds without storing them all).
+    """
+    if callable(values):
+        return values
+    if values is None:
+        return lambda ids: np.broadcast_to(default, (len(ids), length))
+    v = np.asarray(values, dtype=np.float64)
+    if v.ndim == 1:
+        if v.shape != (length,):
+            raise ValueError(f"{what}: expected shape ({length},) or ({N}, {length}), got {v.shape}")
+        return lambda ids: np.broadcast_to(v, (len(ids), length))
+    if v.shape != (N, length):
+        raise ValueError(f"{what}: expected shape ({N}, {length}), got {v.shape}")
+    return lambda ids: v[ids]
+
+
+def solve_pdlp_batch(lp: LP, batch_size: int, lower=None, upper=None, c=None, q=None,
+                     opts: PDLPOptions | None = None, x0=None, y0=None) -> BatchResult:
+    """Solve `batch_size` variants of `lp` together (one batch, no refilling).
+
+    lower, upper, c: None (use lp's), shape (n,) (same for all), or (batch_size, n) (one row per LP).
+    q:               same, with length m.   x0, y0: optional warm starts, same conventions.
+    """
+    return solve_pdlp_stream(lp, batch_size, batch_size, lower, upper, c, q, opts, x0, y0)
+
+
+def solve_pdlp_stream(lp: LP, n_lps: int, slots: int, lower=None, upper=None, c=None, q=None,
+                      opts: PDLPOptions | None = None, x0=None, y0=None) -> BatchResult:
+    """Solve `n_lps` variants of `lp` through `slots` batch columns, refilling as LPs finish.
+
+    Per-LP arguments follow solve_pdlp_batch's conventions, with n_lps rows instead of batch_size.
+    """
+    opts = opts or PDLPOptions()
+    if opts.presolve:
+        raise ValueError("presolve isn't supported in batch mode yet")
+    N, n, m = n_lps, lp.n, lp.m
+    g = dict(c=_rows(c, N, n, lp.c, "c"), q=_rows(q, N, m, lp.q, "q"),
+             lo=_rows(lower, N, n, lp.lower, "lower"), up=_rows(upper, N, n, lp.upper, "upper"),
+             x0=_rows(x0, N, n, np.zeros(n), "x0"), y0=_rows(y0, N, m, np.zeros(m), "y0"))
+    if lower is not None or upper is not None:
+        for start in range(0, N, 256):                  # in chunks: rows may be built on demand
+            ids = np.arange(start, min(N, start + 256))
+            if np.any(g["lo"](ids) > g["up"](ids)):
+                raise ValueError("some variant has a lower bound above its upper bound")
+    if not opts.finish_float64 or opts.backend.dtype == torch.float64:
+        res = _stream(lp, N, slots, g, replace(opts, finish_float64=False))
+        res.finish_iterations = np.zeros(N, dtype=np.int64)
+        return res
+
+    # float32 on the device until each LP stalls, then a float64 finish on the CPU (see module doc).
+    t0 = time.perf_counter()
+    first = _stream(lp, N, slots, g, replace(opts, tol=max(opts.tol, opts.device_tol), finish_float64=False),
+                    stop_on_stall=True)
+    worst = np.maximum.reduce([first.primal_residual, first.dual_residual, first.gap])
+    need = np.array([i for i in range(N) if first.status[i] in ("stalled", "iteration_limit")
+                     or (first.status[i] == "optimal" and worst[i] > opts.tol)], dtype=np.int64)
+    first.finish_iterations = np.zeros(N, dtype=np.int64)
+    if len(need) == 0:
+        return first
+    g2 = dict(c=lambda k: g["c"](need[k]), q=lambda k: g["q"](need[k]),
+              lo=lambda k: g["lo"](need[k]), up=lambda k: g["up"](need[k]),
+              x0=lambda k: first.x[need[k]], y0=lambda k: first.y[need[k]])
+    fin = _stream(lp, len(need), slots, g2,
+                  replace(opts, backend=Backend.preset("cpu"), finish_float64=False,
+                          max_iters=max(opts.max_iters, 1), time_limit=max(opts.time_limit - first.seconds, 1.0)),
+                  omega0=first.omega[need])
+    for j, i in enumerate(need):
+        first.status[i] = fin.status[j]
+        first.objective[i], first.x[i], first.y[i] = fin.objective[j], fin.x[j], fin.y[j]
+        first.primal_residual[i], first.dual_residual[i], first.gap[i] = \
+            fin.primal_residual[j], fin.dual_residual[j], fin.gap[j]
+        first.iterations[i] += fin.iterations[j]
+        first.finish_iterations[i] = fin.iterations[j]
+        first.restarts[i] += fin.restarts[j]
+        first.omega[i] = fin.omega[j]
+    first.total_iterations += fin.total_iterations
+    first.seconds = time.perf_counter() - t0
+    return first
+
+
+_SETUP_CACHE: dict = {}
+
+
+def _shared_setup(K: sp.csr_matrix, ruiz_iters: int, be: Backend):
+    """Scaling, scaled matrix, its norm and the device matrix for K, cached per (K, settings).
+
+    A branch-and-bound calls the batched solver at many nodes with the same K (only bounds change),
+    so this work -- including building a custom kernel's tables -- is done once. Keyed on the
+    object's identity; the cache holds a reference to K so the identity can't be reused.
+    """
+    key = (id(K), ruiz_iters, be)
+    hit = _SETUP_CACHE.get(key)
+    if hit is not None and hit[0] is K:
+        return hit[1]
+    d_r, d_c = _scale(K, ruiz_iters)
+    Ks = (sp.diags(d_r) @ K @ sp.diags(d_c)).tocsr()
+    out = (d_r, d_c, Ks, _operator_norm(Ks), MatVec(Ks, be))
+    if len(_SETUP_CACHE) > 8:
+        _SETUP_CACHE.clear()
+    _SETUP_CACHE[key] = (K, out)
+    return out
+
+
+def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: bool = False,
+            omega0: np.ndarray | None = None) -> BatchResult:
+    """The batched/streamed solver itself. g holds per-LP getters: c, q, lo, up, x0, y0."""
+    be = opts.backend
+    n, m = lp.n, lp.m
+    t0 = time.perf_counter()
+    get_c, get_q, get_lo, get_up, get_x0, get_y0 = g["c"], g["q"], g["lo"], g["up"], g["x0"], g["y0"]
+
+    # ---- shared: scaling and step size (from K alone) ------------------------------------
+    d_r, d_c, Ks, knorm, mv = _shared_setup(lp.K, opts.ruiz_iters, be)
+    eta = opts.step_safety / knorm if knorm > 0 else 1.0
+    T = be.tensor
+    dr_t, dc_t = T(d_r)[:, None], T(d_c)[:, None]
+    ineq = torch.zeros(m, 1, dtype=torch.bool, device=be.device)
+    ineq[lp.m_eq :] = True
+    infeas_tol = opts.infeasibility_tol if opts.infeasibility_tol is not None else (
+        1e-8 if be.dtype == torch.float64 else 1e-4)
+
+    def proj_dual(y):
+        return torch.where(ineq, torch.clamp(y, min=0.0), y)
+
+    # ---- per-slot device state, (n, B) / (m, B); empty slots hold zeros and stay frozen ------
+    zn = lambda: torch.zeros(n, B, dtype=be.dtype, device=be.device)
+    zm = lambda: torch.zeros(m, B, dtype=be.dtype, device=be.device)
+    c_t, q_t, lo_t, up_t = zn(), zm(), zn(), zn()
+    x, y, Kx, KTy = zn(), zm(), zm(), zn()
+    x_sum, y_sum = zn(), zm()
+    n_avg = torch.zeros(1, B, dtype=be.dtype, device=be.device)
+    x_restart, y_restart, x_prev, y_prev = zn(), zm(), zn(), zm()
+    dx_prev, dy_prev, x_best, y_best = zn(), zm(), zn(), zm()
+    lo_fin = up_fin = lo0 = up0 = None
+    tau, sigma = T(np.full(B, eta))[None, :], T(np.full(B, eta))[None, :]
+
+    # ---- per-slot host state, (B,) -----------------------------------------------------------
+    lp_of = np.full(B, -1)                 # which LP each slot holds (-1 = empty)
+    running = np.zeros(B, dtype=bool)
+    age = np.zeros(B, dtype=np.int64)      # iterations since the slot's LP was loaded
+    omega = np.ones(B)
+    kkt_last, kkt_prev = np.ones(B), np.full(B, np.inf)
+    iters_since, restarts_s, streak = np.zeros(B, np.int64), np.zeros(B, np.int64), np.zeros(B, np.int64)
+    last_verdict = np.full(B, None, dtype=object)
+    c_norm, q_norm, c_smax, q_smax = np.zeros(B), np.zeros(B), np.zeros(B), np.zeros(B)
+    best_st = np.zeros((6, B))
+
+    # ---- per-LP results ------------------------------------------------------------------------
+    R_status = np.array(["iteration_limit"] * N, dtype=object)
+    R_obj, R_it, R_rs = np.zeros(N), np.zeros(N, np.int64), np.zeros(N, np.int64)
+    R_omega = np.ones(N)
+    err_hist: list[list[float]] = [[] for _ in range(B)]     # per-slot best error so far (stall detection)
+    R_rp, R_rd, R_gap = np.zeros(N), np.zeros(N), np.zeros(N)
+    R_x, R_y = np.zeros((N, n)), np.zeros((N, m))
+    next_lp = 0
+
+    # ---- the iteration: identical to single-LP PDHG, on n x B matrices -----------------------
+    def step(x, y, Kx, KTy, x_sum, y_sum, n_avg, tau, sigma, active, c_t, q_t, lo_t, up_t):
+        x_new = torch.clamp(x - tau * (c_t - KTy), lo_t, up_t)
+        Kx_new = mv.K(x_new)
+        y_new = proj_dual(y + sigma * (q_t - (2.0 * Kx_new - Kx)))
+        KTy_new = mv.KT(y_new)
+        # Frozen (finished or empty) slots keep their values: same shapes every iteration.
+        x_new = torch.where(active, x_new, x)
+        y_new = torch.where(active, y_new, y)
+        Kx_new = torch.where(active, Kx_new, Kx)
+        KTy_new = torch.where(active, KTy_new, KTy)
+        a = active.to(x.dtype)
+        return x_new, y_new, Kx_new, KTy_new, x_sum + a * x_new, y_sum + a * y_new, n_avg + a
+
+    # ---- per-slot measurements, all returned in one (23, B) tensor ---------------------------
+    def point_stats(x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0):
+        resid = Kx - q_t
+        viol = torch.where(ineq, torch.clamp(-resid, min=0.0), resid)
+        r = c_t - KTy
+        rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
+        # Bounds get credit for a reduced cost only when x is near them (see pdlp._Problem.point_stats).
+        near_lo = lo_fin & (torch.abs(x - lo0) <= torch.abs(x))
+        near_up = up_fin & (torch.abs(x - up0) <= torch.abs(x))
+        dviol = torch.where(near_lo, 0.0, rp) + torch.where(near_up, 0.0, rn)
+        pobj = (c_t * x).sum(0)
+        dobj = (q_t * y).sum(0) + (torch.where(near_lo, lo0, 0.0) * rp).sum(0) - (torch.where(near_up, up0, 0.0) * rn).sum(0)
+        nrm = lambda v: torch.linalg.norm(v, dim=0)
+        return torch.stack([nrm(viol / dr_t), nrm(dviol / dc_t), nrm(viol), nrm(dviol), pobj, dobj])
+
+    def ray_stats(dx, dy, pdx, pdy, x, y, c_t, q_t, lo_fin, up_fin, lo0, up0):
+        dray = proj_dual(dy)
+        r = -mv.KT(dray)
+        rp, rn = torch.clamp(r, min=0.0), torch.clamp(-r, min=0.0)
+        bad = torch.where(lo_fin, 0.0, rp) + torch.where(up_fin, 0.0, rn)
+        dobj = (q_t * dray).sum(0) + (lo0 * rp).sum(0) - (up0 * rn).sum(0)
+        pray = torch.where(lo_fin, torch.clamp(dx, min=0.0), dx)
+        pray = torch.where(up_fin, torch.clamp(pray, max=0.0), pray)
+        Kr = mv.K(pray)
+        viol = torch.where(ineq, torch.clamp(-Kr, min=0.0), Kr)
+        nrm = lambda v: torch.linalg.norm(v, dim=0)
+        cos = lambda a, b: (a * b).sum(0) / (nrm(a) * nrm(b) + 1e-30)    # drift steadiness (see pdlp.py)
+        xfree = torch.where(lo_fin & up_fin, 0.0, torch.abs(x)).amax(0)
+        ymax = torch.abs(y).amax(0) if m else torch.zeros(B, dtype=x.dtype, device=x.device)
+        return torch.stack([nrm(dray), dobj, nrm(bad), nrm(pray), (c_t * pray).sum(0), nrm(viol),
+                            cos(dy, pdy), cos(dx, pdx), xfree, ymax])
+
+    def eval_stats(x, y, Kx, KTy, xa, ya, Kxa, KTya, dx, dy, pdx, pdy, c_t, q_t, lo_fin, up_fin, lo0, up0):
+        d = (c_t, q_t, lo_fin, up_fin, lo0, up0)
+        finite = (torch.isfinite(x).all(0) & torch.isfinite(y).all(0)).to(x.dtype)[None, :]
+        return torch.cat([finite, point_stats(x, y, Kx, KTy, *d), point_stats(xa, ya, Kxa, KTya, *d),
+                          ray_stats(dx, dy, pdx, pdy, x, y, *d)])
+
+    if be.compile:
+        step = torch.compile(step, backend=be.compile_backend or "inductor")
+        eval_stats = torch.compile(eval_stats, backend=be.compile_backend or "inductor")
+
+    def mask_t(mask_np):
+        return torch.as_tensor(mask_np, device=be.device)[None, :]
+
+    def relative(st, cols=slice(None)):
+        p, d, _, _, pobj, dobj = st
+        return (p / (1 + q_norm[cols]), d / (1 + c_norm[cols]),
+                np.abs(pobj - dobj) / (1 + np.abs(pobj) + np.abs(dobj)), pobj)
+
+    def kkt(st, om):
+        _, _, p, d, pobj, dobj = st
+        return np.sqrt(om * p * p + d * d / om + (pobj - dobj) ** 2)
+
+    # ---- loading LPs into slots: full-width masked updates, one fixed-shape program ----------
+    def load(slot_idx: np.ndarray, ids: np.ndarray):
+        nonlocal c_t, q_t, lo_t, up_t, lo_fin, up_fin, lo0, up0, x, y, Kx, KTy, x_sum, y_sum, n_avg
+        nonlocal x_restart, y_restart, x_prev, y_prev, dx_prev, dy_prev, x_best, y_best
+        mask = np.zeros(B, dtype=bool)
+        mask[slot_idx] = True
+        M = mask_t(mask)
+        full = lambda length, rows: _scatter_cols(length, B, slot_idx, rows)
+        C, Q = full(n, get_c(ids)), full(m, get_q(ids))
+        L, U = full(n, get_lo(ids)), full(n, get_up(ids))
+        c_t = torch.where(M, T(C * d_c[:, None]), c_t)
+        q_t = torch.where(M, T(Q * d_r[:, None]), q_t)
+        lo_t = torch.where(M, T(L / d_c[:, None]), lo_t)
+        up_t = torch.where(M, T(U / d_c[:, None]), up_t)
+        lo_fin, up_fin = torch.isfinite(lo_t), torch.isfinite(up_t)
+        lo0, up0 = torch.where(lo_fin, lo_t, 0.0), torch.where(up_fin, up_t, 0.0)
+
+        X0, Y0 = full(n, get_x0(ids)), full(m, get_y0(ids))
+        x = torch.where(M, torch.clamp(T(X0 / d_c[:, None]), lo_t, up_t), x)
+        y = torch.where(M, proj_dual(T(Y0 / d_r[:, None])), y)
+        Kx, KTy = torch.where(M, mv.K(x), Kx), torch.where(M, mv.KT(y), KTy)
+        x_sum, y_sum = torch.where(M, 0.0, x_sum), torch.where(M, 0.0, y_sum)
+        n_avg = torch.where(M, 0.0, n_avg)
+        x_restart, y_restart = torch.where(M, x, x_restart), torch.where(M, y, y_restart)
+        x_prev, y_prev = torch.where(M, x, x_prev), torch.where(M, y, y_prev)
+        dx_prev, dy_prev = torch.where(M, 0.0, dx_prev), torch.where(M, 0.0, dy_prev)
+        x_best, y_best = torch.where(M, x, x_best), torch.where(M, y, y_best)
+
+        # Host bookkeeping for the new LPs.
+        Cs, Qs = C[:, slot_idx] * d_c[:, None], Q[:, slot_idx] * d_r[:, None]
+        cn, qn = np.linalg.norm(Cs, axis=0), np.linalg.norm(Qs, axis=0)
+        omega[slot_idx] = np.where((cn > 1e-10) & (qn > 1e-10), cn / np.maximum(qn, 1e-300), 1.0)
+        if omega0 is not None:                      # warm start keeps the learned step balance
+            w0 = np.asarray(omega0, dtype=np.float64)[ids]
+            omega[slot_idx] = np.where(np.isfinite(w0) & (w0 > 0), w0, omega[slot_idx])
+        tau.copy_(T(eta / omega)[None, :])
+        sigma.copy_(T(eta * omega)[None, :])
+        c_norm[slot_idx] = np.linalg.norm(C[:, slot_idx], axis=0)
+        q_norm[slot_idx] = np.linalg.norm(Q[:, slot_idx], axis=0)
+        c_smax[slot_idx] = np.abs(Cs).max(axis=0, initial=0.0)
+        q_smax[slot_idx] = np.abs(Qs).max(axis=0, initial=0.0)
+        st0 = point_stats(x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0).cpu().double().numpy()
+        best_st[:, slot_idx] = st0[:, slot_idx]
+        kkt_last[slot_idx] = kkt(st0[:, slot_idx], omega[slot_idx])
+        kkt_prev[slot_idx] = np.inf
+        lp_of[slot_idx] = ids
+        running[slot_idx] = True
+        age[slot_idx] = iters_since[slot_idx] = restarts_s[slot_idx] = streak[slot_idx] = 0
+        last_verdict[slot_idx] = None
+        for s_ in slot_idx:
+            err_hist[s_] = []
+
+    first = min(B, N)
+    load(np.arange(first), np.arange(first))
+    next_lp = first
+    active = mask_t(running)
+
+    it = 0
+    while running.any():
+        x, y, Kx, KTy, x_sum, y_sum, n_avg = step(x, y, Kx, KTy, x_sum, y_sum, n_avg, tau, sigma, active,
+                                                  c_t, q_t, lo_t, up_t)
+        be.sync()
+        it += 1
+        age += running
+        iters_since += running
+        if it % opts.eval_every:
+            continue
+
+        # One read: every statistic for every slot.
+        safe_n = torch.clamp(n_avg, min=1.0)
+        xa, ya = x_sum / safe_n, y_sum / safe_n
+        Kxa, KTya = mv.K(xa), mv.KT(ya)
+        dx_now, dy_now = x - x_prev, y - y_prev
+        S = eval_stats(x, y, Kx, KTy, xa, ya, Kxa, KTya, dx_now, dy_now, dx_prev, dy_prev,
+                       c_t, q_t, lo_fin, up_fin, lo0, up0).cpu().double().numpy()
+        dx_prev, dy_prev = dx_now, dy_now
+        finite, cur, avg, ray = S[0], S[1:7], S[7:13], S[13:23]
+
+        status = np.full(B, None, dtype=object)
+        bad = running & ((finite < 1) | ~np.isfinite(S).all(axis=0))
+        status[bad] = "numerical_error"
+
+        # Converged? (current point or running average)
+        rp_c, rd_c, g_c, _ = relative(cur)
+        rp_a, rd_a, g_a, _ = relative(avg)
+        ok_c = (rp_c <= opts.tol) & (rd_c <= opts.tol) & (g_c <= opts.tol)
+        ok_a = (rp_a <= opts.tol) & (rd_a <= opts.tol) & (g_a <= opts.tol)
+        newly_opt = running & ~bad & (ok_c | ok_a)
+        status[newly_opt] = "optimal"
+
+        # Best point per slot: whichever of current / average is closer to optimal.
+        kc, ka = kkt(cur, omega), kkt(avg, omega)
+        cand_avg = np.where(newly_opt, ~ok_c & ok_a, ka < kc)
+        cand_st = np.where(cand_avg[None, :], avg, cur)
+        k_cand = np.minimum(kc, ka)
+        upd = running & ~bad
+        best_st[:, upd] = cand_st[:, upd]
+        ca, cc = mask_t(cand_avg & upd), mask_t(~cand_avg & upd)
+        x_best = torch.where(ca, xa, torch.where(cc, x, x_best))
+        y_best = torch.where(ca, ya, torch.where(cc, y, y_best))
+
+        # No solution? Same safeguards as the single-LP solver, on each LP's own age.
+        dn, dobj, dbad, pn, pobj, pv, dcos, pcos, xfree, ymax = ray
+        warm = age > INFEAS_WARMUP * opts.eval_every
+        inf = warm & (dn > 0) & (dobj > infeas_tol * dn * (1 + q_smax)) \
+            & (dbad * np.maximum(1.0, xfree) <= infeas_tol * dobj) & (dcos >= RAY_COS)
+        unb = warm & ~inf & (pn > 0) & (-pobj > infeas_tol * pn * (1 + c_smax)) \
+            & (pv * np.maximum(1.0, ymax) <= infeas_tol * -pobj) & (pcos >= RAY_COS)
+        verdict = np.full(B, None, dtype=object)
+        verdict[inf], verdict[unb] = "infeasible", "unbounded"
+        same = (verdict != None) & (verdict == last_verdict)  # noqa: E711
+        streak = np.where(same, streak + 1, (verdict != None).astype(np.int64))  # noqa: E711
+        last_verdict = verdict
+        noso = running & ~bad & ~newly_opt & (streak >= INFEAS_STREAK)
+        status[noso] = verdict[noso]
+
+        # Precision stall (float32 phase of the float64 finish): same rule as the single-LP solver.
+        if stop_on_stall:
+            rp_b, rd_b, g_b, _ = relative(best_st)
+            err = np.maximum.reduce([rp_b, rd_b, g_b])
+            for s_ in np.flatnonzero(running & (status == None)):  # noqa: E711
+                h = err_hist[s_]
+                h.append(min(err[s_], h[-1]) if h else err[s_])
+                w = max(opts.stall_window, len(h) // STALL_FRACTION)
+                if h[-1] < STALL_GATE and len(h) > w and h[-1] > 0.5 * h[-1 - w]:
+                    status[s_] = "stalled"
+
+        out_of_time = time.perf_counter() - t0 > opts.time_limit
+        limit = running & (status == None) & ((age >= opts.max_iters) | out_of_time)  # noqa: E711
+        status[limit] = "time_limit" if out_of_time else "iteration_limit"
+
+        # Record finished LPs (one fixed-shape transfer of the best points).
+        finished = running & (status != None)  # noqa: E711
+        if finished.any():
+            XB = (x_best * dc_t).cpu().double().numpy()
+            YB = (y_best * dr_t).cpu().double().numpy()
+            rp, rd, g, po = relative(best_st)
+            for s in np.flatnonzero(finished):
+                k = lp_of[s]
+                R_status[k], R_obj[k], R_it[k], R_rs[k] = status[s], po[s], age[s], restarts_s[s]
+                R_omega[k] = omega[s]
+                R_rp[k], R_rd[k], R_gap[k] = rp[s], rd[s], g[s]
+                # Clip to bounds: the returned point can be an average of iterates, and float32 sums of
+                # values sitting exactly on a bound drift a few ulps past it.
+                lo_k, up_k = get_lo(np.array([k]))[0], get_up(np.array([k]))[0]
+                R_x[k], R_y[k] = np.clip(XB[:, s], lo_k, up_k), YB[:, s]
+            running &= ~finished
+
+        # Restart slots that qualify (and are still running).
+        suff = k_cand <= 0.2 * kkt_last
+        stall = (k_cand <= 0.8 * kkt_last) & (k_cand > kkt_prev)
+        long_ = iters_since >= 0.36 * age
+        kkt_prev = np.where(running, k_cand, kkt_prev)
+        rs = running & (suff | stall | long_)
+        if rs.any():
+            rs_t = mask_t(rs)
+            ra = rs_t & ca
+            x, y = torch.where(ra, xa, x), torch.where(ra, ya, y)
+            Kx, KTy = torch.where(ra, Kxa, Kx), torch.where(ra, KTya, KTy)
+            dxn, dyn = torch.stack([torch.linalg.norm(x - x_restart, dim=0),
+                                    torch.linalg.norm(y - y_restart, dim=0)]).cpu().double().numpy()
+            upd_w = rs & (dxn > 1e-10) & (dyn > 1e-10)
+            omega = np.where(upd_w, np.exp(0.5 * np.log(np.maximum(dyn, 1e-300) / np.maximum(dxn, 1e-300))
+                                           + 0.5 * np.log(omega)), omega)
+            tau.copy_(T(eta / omega)[None, :])
+            sigma.copy_(T(eta * omega)[None, :])
+            x_restart, y_restart = torch.where(rs_t, x, x_restart), torch.where(rs_t, y, y_restart)
+            x_sum, y_sum = torch.where(rs_t, 0.0, x_sum), torch.where(rs_t, 0.0, y_sum)
+            n_avg = torch.where(rs_t, 0.0, n_avg)
+            kkt_last = np.where(rs, kkt(cand_st, omega), kkt_last)
+            kkt_prev = np.where(rs, np.inf, kkt_prev)
+            iters_since = np.where(rs, 0, iters_since)
+            restarts_s += rs
+        x_prev, y_prev = x.clone(), y.clone()
+
+        # Refill free slots from the queue (continuous batching).
+        free = np.flatnonzero(~running)
+        if next_lp < N and len(free) and not out_of_time:
+            take = free[: N - next_lp]
+            load(take, np.arange(next_lp, next_lp + len(take)))
+            next_lp += len(take)
+        active = mask_t(running)
+
+    # LPs never loaded (time ran out) keep status "time_limit".
+    R_status[next_lp:] = "time_limit"
+    total = max(it, 1)
+    return BatchResult(
+        status=list(R_status), objective=R_obj, x=R_x, y=R_y, iterations=R_it, restarts=R_rs,
+        primal_residual=R_rp, dual_residual=R_rd, gap=R_gap, total_iterations=it,
+        seconds=time.perf_counter() - t0, useful_work=float(R_it.sum() / (B * total)), omega=R_omega,
+    )
+
+
+def _scatter_cols(length: int, B: int, slot_idx: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    """A (length, B) host array holding `rows` in the given slot columns and zeros elsewhere."""
+    out = np.zeros((length, B))
+    out[:, slot_idx] = np.asarray(rows).T
+    return out

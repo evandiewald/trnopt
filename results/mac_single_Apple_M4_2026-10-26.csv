@@ -1,0 +1,29 @@
+backend,instance,iterations,nnz,obj_err,seconds,section,status,us_per_iter
+cpu-float32,comp21-2idx.mps.gz,,57301,,,per_iter,,123.49899066066428
+mps-metal,comp21-2idx.mps.gz,,57301,,,per_iter,,401.0783851299493
+cpu-float32,neos-933966.mps.gz,,180618,,,per_iter,,202.34837261341454
+mps-metal,neos-933966.mps.gz,,180618,,,per_iter,,634.0312499560241
+cpu-float32,chromaticindex512-7.mps.gz,,135156,,,per_iter,,320.4520835879521
+mps-metal,chromaticindex512-7.mps.gz,,135156,,,per_iter,,872.8603515464783
+cpu-float32,neos-4300652-rahue.mps.gz,,183616,,,per_iter,,430.4435226458736
+mps-metal,neos-4300652-rahue.mps.gz,,183616,,,per_iter,,1395.1267257652944
+cpu-float32,comp21-2idx.mps.gz,960,,0.0,0.12906387500697747,solve,optimal,
+mps-metal,comp21-2idx.mps.gz,200000,,1.943574534379877e-05,27.415847084019333,solve,iteration_limit,
+HiGHS simplex,comp21-2idx.mps.gz,,,,0.12277575000189245,solve,,
+HiGHS ipm,comp21-2idx.mps.gz,,,,0.4945091250119731,solve,,
+HiGHS pdlp,comp21-2idx.mps.gz,,,,0.10463162499945611,solve,,
+cpu-float32,neos-933966.mps.gz,640,,3.826655553571767e-07,0.16456641699187458,solve,optimal,
+mps-metal,neos-933966.mps.gz,640,,3.826655553571767e-07,0.7048562499694526,solve,optimal,
+HiGHS simplex,neos-933966.mps.gz,,,,2.0968358750105835,solve,,
+HiGHS ipm,neos-933966.mps.gz,,,,0.5525925839901902,solve,,
+HiGHS pdlp,neos-933966.mps.gz,,,,0.09227274998556823,solve,,
+cpu-float32,chromaticindex512-7.mps.gz,256,,1.823902130126953e-05,0.11735379201127216,solve,optimal,
+mps-metal,chromaticindex512-7.mps.gz,256,,9.655952453613281e-06,0.9205436250194907,solve,optimal,
+HiGHS simplex,chromaticindex512-7.mps.gz,,,,15.40928254101891,solve,,
+HiGHS ipm,chromaticindex512-7.mps.gz,,,,3.026094375003595,solve,,
+HiGHS pdlp,chromaticindex512-7.mps.gz,,,,0.16609837498981506,solve,,
+cpu-float32,neos-4300652-rahue.mps.gz,768,,0.0,0.37012087501352653,solve,optimal,
+mps-metal,neos-4300652-rahue.mps.gz,768,,0.0,1.613355167035479,solve,optimal,
+HiGHS simplex,neos-4300652-rahue.mps.gz,,,,0.38906895800027996,solve,,
+HiGHS ipm,neos-4300652-rahue.mps.gz,,,,1.6978138330159709,solve,,
+HiGHS pdlp,neos-4300652-rahue.mps.gz,,,,0.5061372499912977,solve,,

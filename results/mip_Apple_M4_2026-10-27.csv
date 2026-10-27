@@ -1,0 +1,64 @@
+bound,gap,heuristic_seconds,instance,matches_highs,method,node_lp_seconds,nodes,objective,seconds,status,strong_lps,strong_seconds
+,,,setcover_200x400_s2,,HiGHS MIP (all features),,,382.9999999999955,0.7768790000118315,Optimal,,
+inf,inf,0.0,setcover_200x400_s2,False,most fractional,0.00025400001322850585,1,inf,0.0010841659968718886,infeasible,0,0.0
+inf,inf,0.0,setcover_200x400_s2,False,pseudocost,2.7125002816319466e-05,1,inf,0.0003738750237971544,infeasible,0,0.0
+inf,inf,0.0,setcover_200x400_s2,False,"reliability, HiGHS 1 core",2.475001383572817e-05,1,inf,0.0003463749890215695,infeasible,0,0.0
+inf,inf,0.0,setcover_200x400_s2,False,"reliability, HiGHS 10 cores",0.00021704199025407434,1,inf,0.00501729198731482,infeasible,0,0.0
+inf,inf,0.0,setcover_200x400_s2,False,"reliability, trnopt CPU",4.349998198449612e-05,1,inf,0.0007982499664649367,infeasible,0,0.0
+inf,inf,0.0,setcover_200x400_s2,False,"reliability, trnopt GPU",3.21660190820694e-05,1,inf,0.0004083749954588711,infeasible,0,0.0
+,,,indset_300_a4_s2,,HiGHS MIP (all features),,,-131.00000000000335,1.3052852909895591,Optimal,,
+inf,inf,0.0,indset_300_a4_s2,False,most fractional,3.691698657348752e-05,1,inf,0.00046316697262227535,infeasible,0,0.0
+inf,inf,0.0,indset_300_a4_s2,False,pseudocost,2.2540974896401167e-05,1,inf,0.00030883302679285407,infeasible,0,0.0
+inf,inf,0.0,indset_300_a4_s2,False,"reliability, HiGHS 1 core",2.0417035557329655e-05,1,inf,0.0002828749711625278,infeasible,0,0.0
+inf,inf,0.0,indset_300_a4_s2,False,"reliability, HiGHS 10 cores",2.141698496416211e-05,1,inf,0.000511875026859343,infeasible,0,0.0
+inf,inf,0.0,indset_300_a4_s2,False,"reliability, trnopt CPU",2.012500772252679e-05,1,inf,0.00027837499510496855,infeasible,0,0.0
+inf,inf,0.0,indset_300_a4_s2,False,"reliability, trnopt GPU",2.0292005501687527e-05,1,inf,0.00027466705068945885,infeasible,0,0.0
+,,,cauction_80x400_s2,,HiGHS MIP (all features),,,-5222.838209781183,2.9105477909906767,Optimal,,
+inf,inf,0.0,cauction_80x400_s2,False,most fractional,3.4750031773000956e-05,1,inf,0.0003772500203922391,infeasible,0,0.0
+inf,inf,0.0,cauction_80x400_s2,False,pseudocost,2.4667009711265564e-05,1,inf,0.0002702089841477573,infeasible,0,0.0
+inf,inf,0.0,cauction_80x400_s2,False,"reliability, HiGHS 1 core",2.2833002731204033e-05,1,inf,0.00025529199047014117,infeasible,0,0.0
+inf,inf,0.0,cauction_80x400_s2,False,"reliability, HiGHS 10 cores",2.3458036594092846e-05,1,inf,0.0003882909659296274,infeasible,0,0.0
+inf,inf,0.0,cauction_80x400_s2,False,"reliability, trnopt CPU",2.174999099224806e-05,1,inf,0.00024620897602289915,infeasible,0,0.0
+inf,inf,0.0,cauction_80x400_s2,False,"reliability, trnopt GPU",2.1333980839699507e-05,1,inf,0.0002436250215396285,infeasible,0,0.0
+,,,facility_40x30_s2,,HiGHS MIP (all features),,,6885.364238169614,0.2852527920040302,Optimal,,
+inf,inf,0.0,facility_40x30_s2,False,most fractional,6.970902904868126e-05,1,inf,0.0006764580029994249,infeasible,0,0.0
+inf,inf,0.0,facility_40x30_s2,False,pseudocost,6.19160127826035e-05,1,inf,0.0005731659475713968,infeasible,0,0.0
+inf,inf,0.0,facility_40x30_s2,False,"reliability, HiGHS 1 core",5.94580196775496e-05,1,inf,0.0005695000290870667,infeasible,0,0.0
+inf,inf,0.0,facility_40x30_s2,False,"reliability, HiGHS 10 cores",5.541602149605751e-05,1,inf,0.0006784169818274677,infeasible,0,0.0
+inf,inf,0.0,facility_40x30_s2,False,"reliability, trnopt CPU",5.8833975344896317e-05,1,inf,0.0005739170010201633,infeasible,0,0.0
+inf,inf,0.0,facility_40x30_s2,False,"reliability, trnopt GPU",5.829200381413102e-05,1,inf,0.0005438329535536468,infeasible,0,0.0
+,,,setcover_400x800_s3,,HiGHS MIP (all features),,,261.99999999999966,1.1296223340323195,Optimal,,
+inf,inf,0.0,setcover_400x800_s3,False,most fractional,6.849999772384763e-05,1,inf,0.001215792028233409,infeasible,0,0.0
+inf,inf,0.0,setcover_400x800_s3,False,pseudocost,5.4875039495527744e-05,1,inf,0.0010872079874388874,infeasible,0,0.0
+inf,inf,0.0,setcover_400x800_s3,False,"reliability, HiGHS 1 core",5.3540978115051985e-05,1,inf,0.0010621669935062528,infeasible,0,0.0
+inf,inf,0.0,setcover_400x800_s3,False,"reliability, HiGHS 10 cores",4.9250025767832994e-05,1,inf,0.001202707993797958,infeasible,0,0.0
+inf,inf,0.0,setcover_400x800_s3,False,"reliability, trnopt CPU",5.254201823845506e-05,1,inf,0.0010935000027529895,infeasible,0,0.0
+inf,inf,0.0,setcover_400x800_s3,False,"reliability, trnopt GPU",5.7124998420476913e-05,1,inf,0.0010991660528816283,infeasible,0,0.0
+,,,setcover_500x1000_s3,,HiGHS MIP (all features),,,917.0,5.149402540992014,Optimal,,
+inf,inf,0.0,setcover_500x1000_s3,False,most fractional,6.41250517219305e-05,1,inf,0.0009115839493460953,infeasible,0,0.0
+inf,inf,0.0,setcover_500x1000_s3,False,pseudocost,5.3291034419089556e-05,1,inf,0.0008087090100161731,infeasible,0,0.0
+inf,inf,0.0,setcover_500x1000_s3,False,"reliability, HiGHS 1 core",5.400000372901559e-05,1,inf,0.0007785420166328549,infeasible,0,0.0
+inf,inf,0.0,setcover_500x1000_s3,False,"reliability, HiGHS 10 cores",5.0292001105844975e-05,1,inf,0.000919416022952646,infeasible,0,0.0
+inf,inf,0.0,setcover_500x1000_s3,False,"reliability, trnopt CPU",5.1084032747894526e-05,1,inf,0.0007816660217940807,infeasible,0,0.0
+inf,inf,0.0,setcover_500x1000_s3,False,"reliability, trnopt GPU",5.429197335615754e-05,1,inf,0.0008152080117724836,infeasible,0,0.0
+,,,indset_500_a4_s3,,HiGHS MIP (all features),,,-231.0,0.971420791989658,Optimal,,
+inf,inf,0.0,indset_500_a4_s3,False,most fractional,4.2625004425644875e-05,1,inf,0.0005476249498315156,infeasible,0,0.0
+inf,inf,0.0,indset_500_a4_s3,False,pseudocost,3.38749960064888e-05,1,inf,0.00045662501361221075,infeasible,0,0.0
+inf,inf,0.0,indset_500_a4_s3,False,"reliability, HiGHS 1 core",3.21249826811254e-05,1,inf,0.00044166698353365064,infeasible,0,0.0
+inf,inf,0.0,indset_500_a4_s3,False,"reliability, HiGHS 10 cores",2.9957969672977924e-05,1,inf,0.0005585410399362445,infeasible,0,0.0
+inf,inf,0.0,indset_500_a4_s3,False,"reliability, trnopt CPU",3.1167000997811556e-05,1,inf,0.0004540829686447978,infeasible,0,0.0
+inf,inf,0.0,indset_500_a4_s3,False,"reliability, trnopt GPU",3.054103581234813e-05,1,inf,0.0004302919842302799,infeasible,0,0.0
+,,,indset_800_a4_s3,,HiGHS MIP (all features),,,-375.00000000000017,6.77428766596131,Optimal,,
+inf,inf,0.0,indset_800_a4_s3,False,most fractional,6.491696694865823e-05,1,inf,0.0007933750166557729,infeasible,0,0.0
+inf,inf,0.0,indset_800_a4_s3,False,pseudocost,5.0292001105844975e-05,1,inf,0.0007277080439962447,infeasible,0,0.0
+inf,inf,0.0,indset_800_a4_s3,False,"reliability, HiGHS 1 core",4.770804662257433e-05,1,inf,0.0007001659832894802,infeasible,0,0.0
+inf,inf,0.0,indset_800_a4_s3,False,"reliability, HiGHS 10 cores",4.4082989916205406e-05,1,inf,0.0008246250217780471,infeasible,0,0.0
+inf,inf,0.0,indset_800_a4_s3,False,"reliability, trnopt CPU",4.9499969463795424e-05,1,inf,0.0006988749955780804,infeasible,0,0.0
+inf,inf,0.0,indset_800_a4_s3,False,"reliability, trnopt GPU",4.6666013076901436e-05,1,inf,0.0007196249789558351,infeasible,0,0.0
+,,,cauction_150x700_s3,,HiGHS MIP (all features),,,-9422.484257719812,19.20939845801331,Optimal,,
+inf,inf,0.0,cauction_150x700_s3,False,most fractional,4.7874986194074154e-05,1,inf,0.0005004170234315097,infeasible,0,0.0
+inf,inf,0.0,cauction_150x700_s3,False,pseudocost,3.9000005926936865e-05,1,inf,0.00041141704423353076,infeasible,0,0.0
+inf,inf,0.0,cauction_150x700_s3,False,"reliability, HiGHS 1 core",3.662501694634557e-05,1,inf,0.00039724999805912375,infeasible,0,0.0
+inf,inf,0.0,cauction_150x700_s3,False,"reliability, HiGHS 10 cores",3.408297197893262e-05,1,inf,0.0005282500060275197,infeasible,0,0.0
+inf,inf,0.0,cauction_150x700_s3,False,"reliability, trnopt CPU",3.429199568927288e-05,1,inf,0.0003904579789377749,infeasible,0,0.0
+inf,inf,0.0,cauction_150x700_s3,False,"reliability, trnopt GPU",3.583298530429602e-05,1,inf,0.0003979590255767107,infeasible,0,0.0
