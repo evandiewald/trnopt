@@ -54,3 +54,27 @@ def test_never_cuts_off_the_optimum(make):
     lo, up, bad = P.propagate(L, U)
     assert not bad
     assert np.all(x >= lo - 1e-6) and np.all(x <= up + 1e-6)
+
+
+@pytest.mark.parametrize("make", [lambda: set_cover(100, 200, 0.05, seed=1), lambda: independent_set(120, 4, seed=1),
+                                  lambda: facility_location(15, 10, seed=1),
+                                  lambda: load_mps(str(DATA / "miplib" / "neos-911970.mps.gz"))],
+                         ids=["setcover", "indset", "facility", "neos-911970"])
+@pytest.mark.parametrize("backend", ["cpu", "cpu-float32"])
+def test_batched_and_dense_rounding_match(make, backend):
+    """Propagator.round_batch == the per-point loop, and the dense tensor version (propagate_torch) agrees."""
+    import dataclasses
+    from trnopt.propagate_torch import TorchPropagator
+    from trnopt.reference import solve_highs
+    lp = make()
+    x = solve_highs(dataclasses.replace(lp, integer=None)).x
+    rng = np.random.default_rng(0)
+    ints = np.flatnonzero(lp.integer)
+    X = np.repeat(x[None], 6, 0)
+    X[1:, ints] += rng.uniform(-0.3, 0.3, (5, len(ints)))
+    P = Propagator(lp)
+    loop = np.stack([P.round(X[p], lp.lower, lp.upper)[0] for p in range(6)])
+    Xb = P.round_batch(X, lp.lower, lp.upper)[0]
+    np.testing.assert_array_equal(loop, Xb)
+    Xt = TorchPropagator(lp, backend).round_batch(X, lp.lower, lp.upper)[0]
+    np.testing.assert_array_equal(Xb[:, ints], Xt[:, ints])

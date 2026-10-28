@@ -18,7 +18,9 @@ are the classic general-purpose family (Gomory 1960; the mixed-integer form is w
 HiGHS conventions (checked numerically): basis columns come from [A I] with logical s = -r, so the tableau row is
 abar x - binv r = 0 with abar = getReducedRow(k), binv = getBasisInverseRow(k).
 
-Cuts are numerically delicate, so each one is cleaned (tiny coefficients removed with a bound-based rhs
+Cuts are rejected if they touch more than max_density (default 10%) of the columns: GMI cuts on set cover or
+auction models come out ~85-90% dense, nearly doubling the matrix and slowing every node LP for a small bound
+gain. Cuts are numerically delicate, so each one is cleaned (tiny coefficients removed with a bound-based rhs
 correction), rejected if its coefficient range is extreme or it barely cuts off the LP point, and checked
 against near-duplicates. Rounds repeat (solve -> cut -> resolve) until the bound stops moving. Cuts that are slack
 at the final LP are dropped. Every cut is globally valid, so branch-and-bound runs on the strengthened model.
@@ -50,7 +52,8 @@ class CutInfo:
 
 
 def _gmi_cuts(h, lp: LP, K_all: sp.csr_matrix, row_lo, row_up, integer, max_cuts: int,
-              min_frac: float = 0.01, max_dyn: float = 1e6, min_eff: float = 1e-5, max_par: float = 0.99):
+              min_frac: float = 0.01, max_dyn: float = 1e6, min_eff: float = 1e-5, max_par: float = 0.99,
+              max_density: float = 0.1):
     """GMI cuts from the current optimal basis of h. Returns a list of (gamma (n,), delta, efficacy)."""
     n = lp.n
     sol = h.getSolution()
@@ -124,6 +127,8 @@ def _gmi_cuts(h, lp: LP, K_all: sp.csr_matrix, row_lo, row_up, integer, max_cuts
         nzv = np.abs(gamma[gamma != 0])
         if nzv.size == 0 or nzv.max() / nzv.min() > max_dyn:
             continue
+        if nzv.size > max(10, max_density * n):                  # dense cuts slow every node LP for little gain
+            continue
         viol = delta - float(gamma @ x)
         norm = float(np.linalg.norm(gamma))
         eff = viol / norm
@@ -143,7 +148,7 @@ def _gmi_cuts(h, lp: LP, K_all: sp.csr_matrix, row_lo, row_up, integer, max_cuts
 
 
 def root_cuts(lp: LP, rounds: int = 5, max_cuts: int = 100, time_limit: float = 60.0, min_gain: float = 1e-4,
-              verbose: bool = False) -> tuple[LP, CutInfo]:
+              max_density: float = 0.1, verbose: bool = False) -> tuple[LP, CutInfo]:
     """Add rounds of GMI cuts to lp's root relaxation. Returns (lp with cut rows appended as ">=" rows, info)."""
     t0 = time.perf_counter()
     info = CutInfo()
@@ -167,7 +172,7 @@ def root_cuts(lp: LP, rounds: int = 5, max_cuts: int = 100, time_limit: float = 
         if time.perf_counter() - t0 > time_limit:
             break
         K_all = sp.vstack(rows_K).tocsr()
-        cuts = _gmi_cuts(h, lp, K_all, row_lo, row_up, integer, max_cuts)
+        cuts = _gmi_cuts(h, lp, K_all, row_lo, row_up, integer, max_cuts, max_density=max_density)
         info.rounds = rd + 1
         if not cuts:
             break

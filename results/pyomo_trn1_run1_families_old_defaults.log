@@ -1,0 +1,61 @@
+On-device RNG not available - CPU RNG will be used
+host trn1.2xlarge   trnopt backend neuron   solvers ['highs', 'trnopt']   time limit 120s   gap 0.0001
+
+setcover_200x400_s2: 200 rows x 400 cols, 3919 nonzeros, 400 integer
+   highs [run 1]                optimal          obj 383  bound 383  gap 0.0e+00       1.9 s
+   trnopt (neuron) [run 1]      optimal          obj 383  bound 383  gap 0.0e+00     119.7 s
+   trnopt (neuron) [run 2]      optimal          obj 383  bound 383  gap 0.0e+00       2.0 s
+
+indset_300_a4_s2: 970 rows x 300 cols, 2048 nonzeros, 300 integer
+   highs [run 1]                optimal          obj -131  bound -131  gap 0.0e+00       2.4 s
+   trnopt (neuron) [run 1]      maxTimeLimit     obj -123  bound -133.083  gap 8.2e-02     131.6 s
+   trnopt (neuron) [run 2]      optimal          obj -131  bound -131  gap 4.3e-16       4.8 s
+
+cauction_80x400_s2: 80 rows x 400 cols, 2243 nonzeros, 400 integer
+   highs [run 1]                optimal          obj -5222.84  bound -5223.32  gap 9.2e-05       3.7 s
+   trnopt (neuron) [run 1]      maxTimeLimit     obj -3460.18  bound -5441.41  gap 5.7e-01     144.4 s
+   trnopt (neuron) [run 2]      optimal          obj -5222.84  bound -5222.84  gap 1.4e-15      16.4 s
+
+facility_40x30_s2: 1271 rows x 1230 cols, 4860 nonzeros, 30 integer
+   highs [run 1]                optimal          obj 6885.36  bound 6885.36  gap 0.0e+00       0.7 s
+   trnopt (neuron) [run 1]      optimal          obj 6885.36  bound 6885.36  gap 0.0e+00      35.7 s
+   trnopt (neuron) [run 2]      optimal          obj 6885.36  bound 6885.36  gap 0.0e+00       5.0 s
+
+setcover_400x800_s3: 400 rows x 800 cols, 15616 nonzeros, 800 integer
+   highs [run 1]                optimal          obj 262  bound 262  gap 0.0e+00       3.7 s
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[0]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[0]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[0]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     121.9 s
+   trnopt (neuron) [run 2]      optimal          obj 262  bound 262  gap 0.0e+00       4.4 s
+
+setcover_500x1000_s3: 500 rows x 1000 cols, 9911 nonzeros, 1000 integer
+   highs [run 1]                optimal          obj 917  bound 917  gap 0.0e+00      12.6 s
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[0]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[0]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[0]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     132.8 s
+   trnopt (neuron) [run 2]      optimal          obj 917  bound 917  gap 0.0e+00      81.3 s
+
+indset_500_a4_s3: 1732 rows x 500 cols, 3590 nonzeros, 500 integer
+   highs [run 1]                optimal          obj -231  bound -231  gap 0.0e+00       3.3 s
+   trnopt (neuron) [run 1]      optimal          obj -231  bound -231  gap 0.0e+00      98.5 s
+   trnopt (neuron) [run 2]      optimal          obj -231  bound -231  gap 0.0e+00       6.6 s
+
+indset_800_a4_s3: 2808 rows x 800 cols, 5804 nonzeros, 800 integer
+   highs [run 1]                optimal          obj -375  bound -375  gap 0.0e+00       4.5 s
+   trnopt (neuron) [run 1]      optimal          obj -375  bound -375  gap 0.0e+00      70.5 s
+   trnopt (neuron) [run 2]      optimal          obj -375  bound -375  gap 0.0e+00      11.7 s
+
+cauction_150x700_s3: 150 rows x 700 cols, 3927 nonzeros, 700 integer
+   highs [run 1]                optimal          obj -9422.48  bound -9423.35  gap 9.1e-05      43.1 s
+   trnopt (neuron) [run 1]      maxTimeLimit     obj -1738.55  bound -9968.79  gap 4.7e+00     123.8 s
+   trnopt (neuron) [run 2]      optimal          obj -9422.48  bound -9422.48  gap 1.9e-16     114.6 s
+
+chromaticindex512-7.mps.gz: 33791 rows x 36864 cols, 135156 nonzeros, 36864 integer

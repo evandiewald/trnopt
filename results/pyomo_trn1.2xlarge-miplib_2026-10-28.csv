@@ -1,0 +1,22 @@
+instance,rows,cols,nnz,solver,run,termination,objective,bound,gap,seconds,time_limit,gap_tol
+chromaticindex512-7.mps.gz,33791,36864,135156,highs,1,killed (ignored time limit),nan,nan,nan,240.0,120.0,0.0001
+chromaticindex512-7.mps.gz,33791,36864,135156,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,428.648,120.0,0.0001
+chromaticindex512-7.mps.gz,33791,36864,135156,trnopt (neuron),2,killed (ignored time limit),nan,nan,nan,240.0,120.0,0.0001
+comp21-2idx.mps.gz,14038,10863,57301,highs,1,killed (ignored time limit),nan,nan,nan,240.0,120.0,0.0001
+comp21-2idx.mps.gz,14038,10863,57301,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,122.816,120.0,0.0001
+comp21-2idx.mps.gz,14038,10863,57301,trnopt (neuron),2,maxTimeLimit,nan,nan,nan,143.624,120.0,0.0001
+neos-4300652-rahue.mps.gz,76992,33003,183616,highs,1,killed (ignored time limit),nan,nan,nan,240.0,120.0,0.0001
+neos-4300652-rahue.mps.gz,76992,33003,183616,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,177.447,120.0,0.0001
+neos-4300652-rahue.mps.gz,76992,33003,183616,trnopt (neuron),2,maxTimeLimit,nan,nan,nan,126.262,120.0,0.0001
+neos-4954672-berkel.mps.gz,1848,1533,8007,highs,1,killed (ignored time limit),nan,nan,nan,240.0,120.0,0.0001
+neos-4954672-berkel.mps.gz,1848,1533,8007,trnopt (neuron),1,maxTimeLimit,8710862.0,1618723.368965399,0.8141718501607076,124.059,120.0,0.0001
+neos-4954672-berkel.mps.gz,1848,1533,8007,trnopt (neuron),2,maxTimeLimit,3841861.0000000005,1735181.2661075296,0.5483487648023888,120.083,120.0,0.0001
+neos-911970.mps.gz,107,888,3408,highs,1,optimal,54.76000000000009,54.7547141708635,9.652719387489705e-05,6.874,120.0,0.0001
+neos-911970.mps.gz,107,888,3408,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,120.049,120.0,0.0001
+neos-911970.mps.gz,107,888,3408,trnopt (neuron),2,maxTimeLimit,nan,nan,nan,120.086,120.0,0.0001
+neos-933966.mps.gz,12047,31762,180618,highs,1,optimal,318.0,318.0,0.0,55.163,120.0,0.0001
+neos-933966.mps.gz,12047,31762,180618,trnopt (neuron),1,maxTimeLimit,54297.0,317.9999999999997,0.9941433228355158,120.724,120.0,0.0001
+neos-933966.mps.gz,12047,31762,180618,trnopt (neuron),2,maxTimeLimit,2365.012253494817,317.9999999999999,0.865539808713428,136.854,120.0,0.0001
+nu25-pr12.mps.gz,2313,5868,17712,highs,1,optimal,53904.99999999999,53900.0,9.275577404679945e-05,6.438,120.0,0.0001
+nu25-pr12.mps.gz,2313,5868,17712,trnopt (neuron),1,maxTimeLimit,54175.0,53541.1304347826,0.011700407295198879,142.531,120.0,0.0001
+nu25-pr12.mps.gz,2313,5868,17712,trnopt (neuron),2,maxTimeLimit,53915.0,53759.13043478261,0.002891024116060316,120.083,120.0,0.0001

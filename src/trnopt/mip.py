@@ -200,7 +200,9 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
     """Branch-and-bound on lp (lp.integer marks the integer variables). See the module docstring.
 
     max_candidates: strong-branch on at most this many fractional variables (most fractional first);
-                    None = all of them ("full strong branching").
+                    None = all of them ("full strong branching"), capped by memory: one strong-branching batch
+                    holds 2 x candidates solutions of size n + m, so at most ~2e8 / (2 (n + m)) candidates
+                    (chromaticindex512-7, 36,864 binaries, would otherwise need 13 GB in one batch).
     strong_depth:   strong-branch only at nodes up to this depth, most-fractional below it; None = everywhere.
     highs_workers:  processes for strong_highs (give it the machine's cores for a fair comparison).
     strong_iters:   trnopt engine: PDHG iterations per strong-branching LP (warm-started from the parent).
@@ -240,12 +242,16 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
     rule, engine = rules[branching]
     t0 = time.perf_counter()
     cut_info = None
+    lp_orig = lp                                       # the pump works on the uncut model (sparser; cuts are implied)
     if cuts:
         from .cuts import root_cuts
         lp, cut_info = root_cuts(lp, rounds=cuts, max_cuts=cut_max, time_limit=min(60.0, 0.2 * time_limit),
                                  verbose=verbose)
     be = Backend.preset(backend) if isinstance(backend, str) else backend
     ints = np.flatnonzero(lp.integer)
+    if engine == "trnopt":
+        mem_cap = max(64, int(2e8 // (2 * (lp.n + lp.m))))
+        max_candidates = mem_cap if max_candidates is None else min(max_candidates, mem_cap)
     times = dict(node_lp=0.0, strong=0.0, heuristic=0.0)
     counts = dict(node_lp=0, strong_lps=0, strong_nodes=0, verify_lps=0, top1_confirmed=0)
     if cut_info is not None:
@@ -305,7 +311,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
             return (st_, obj_, xr_) if st_ == "optimal" and feasible(xr_) else None
 
         budget = pump_time if pump_time is not None else min(60.0, 0.2 * time_limit)
-        pr = feasibility_pump(lp, x, backend=be, pumps=pump, rounds=pump_rounds,
+        pr = feasibility_pump(lp_orig, x, backend=be, pumps=pump, rounds=pump_rounds,
                               time_limit=max(0.0, min(budget, time_limit - elapsed())), lower=node.lower,
                               upper=node.upper, repair=repair, stop_after=None, patience=pump_patience,
                               verbose=verbose)
@@ -374,7 +380,8 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
 
             r = solve_pdlp_stream(lp, len(down_up_p), be.batch_slots(len(down_up_p), slots), lower=rows(node.lower, nlo),
                                   upper=rows(node.upper, nup), x0=x, y0=y,
-                                  opts=PDLPOptions(tol=strong_tol, backend=be, max_iters=strong_iters, time_limit=300))
+                                  opts=PDLPOptions(tol=strong_tol, backend=be, max_iters=strong_iters,
+                                                   time_limit=max(1.0, time_limit - elapsed())))
             infeasible = np.array([s == "infeasible" for s in r.status[:-1]])
             objs = list(np.where(infeasible, np.inf, np.asarray(r.objective[:-1]) - r.objective[-1] + node.bound))
         times["strong"] += time.perf_counter() - t

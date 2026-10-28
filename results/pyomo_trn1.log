@@ -1,0 +1,172 @@
+On-device RNG not available - CPU RNG will be used
+host trn1.2xlarge-miplib   trnopt backend neuron   solvers ['highs', 'trnopt']   time limit 120s   gap 0.0001
+
+chromaticindex512-7.mps.gz: 33791 rows x 36864 cols, 135156 nonzeros, 36864 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        killed (ignored time limit) obj nan  bound nan  gap nan     240.0 s
+On-device RNG not available - CPU RNG will be used
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[0]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[0]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[0]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     428.6 s
+   trnopt (neuron) [run 2]      killed (ignored time limit) obj nan  bound nan  gap nan     240.0 s
+
+comp21-2idx.mps.gz: 14038 rows x 10863 cols, 57301 nonzeros, 10863 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        killed (ignored time limit) obj nan  bound nan  gap nan     240.0 s
+On-device RNG not available - CPU RNG will be used
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[1887]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[1887]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[1887]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     122.8 s
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[1887]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[1887]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[1887]
+   trnopt (neuron) [run 2]      maxTimeLimit     obj nan  bound nan  gap nan     143.6 s
+
+neos-4300652-rahue.mps.gz: 76992 rows x 33003 cols, 183616 nonzeros, 20900 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        killed (ignored time limit) obj nan  bound nan  gap nan     240.0 s
+On-device RNG not available - CPU RNG will be used
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[12255]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[12255]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[12255]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     177.4 s
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[12255]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[12255]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[12255]
+   trnopt (neuron) [run 2]      maxTimeLimit     obj nan  bound nan  gap nan     126.3 s
+
+neos-4954672-berkel.mps.gz: 1848 rows x 1533 cols, 8007 nonzeros, 630 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        killed (ignored time limit) obj nan  bound nan  gap nan     240.0 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      maxTimeLimit     obj 8.71086e+06  bound 1.61872e+06  gap 8.1e-01     124.1 s
+   trnopt (neuron) [run 2]      maxTimeLimit     obj 3.84186e+06  bound 1.73518e+06  gap 5.5e-01     120.1 s
+
+neos-911970.mps.gz: 107 rows x 888 cols, 3408 nonzeros, 840 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 54.76  bound 54.7547  gap 9.7e-05       6.9 s
+On-device RNG not available - CPU RNG will be used
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[0]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[0]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[0]
+   trnopt (neuron) [run 1]      maxTimeLimit     obj nan  bound nan  gap nan     120.0 s
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: x[0]
+    (object: <class 'pyomo.core.base.var.VarData'>)
+No value for uninitialized VarData object x[0]
+ERROR:pyomo.common.numeric_types:evaluating object as numeric value: obj
+    (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+No value for uninitialized VarData object x[0]
+   trnopt (neuron) [run 2]      maxTimeLimit     obj nan  bound nan  gap nan     120.1 s
+
+neos-933966.mps.gz: 12047 rows x 31762 cols, 180618 nonzeros, 27982 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 318  bound 318  gap 0.0e+00      55.2 s
+On-device RNG not available - CPU RNG will be used
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+   trnopt (neuron) [run 1]      maxTimeLimit     obj 54297  bound 318  gap 9.9e-01     120.7 s
+   trnopt (neuron) [run 2]      maxTimeLimit     obj 2365.01  bound 318  gap 8.7e-01     136.9 s
+
+nu25-pr12.mps.gz: 2313 rows x 5868 cols, 17712 nonzeros, 5868 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 53905  bound 53900  gap 9.3e-05       6.4 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      maxTimeLimit     obj 54175  bound 53541.1  gap 1.2e-02     142.5 s
+   trnopt (neuron) [run 2]      maxTimeLimit     obj 53915  bound 53759.1  gap 2.9e-03     120.1 s
+
+Wrote /home/ubuntu/trnopt/results/pyomo_trn1.2xlarge-miplib_2026-10-28.csv
+/usr/lib/python3.12/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+On-device RNG not available - CPU RNG will be used
+host trn1.2xlarge-families   trnopt backend neuron   solvers ['highs', 'trnopt']   time limit 120s   gap 0.0001
+
+setcover_200x400_s2: 200 rows x 400 cols, 3919 nonzeros, 400 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 383  bound 383  gap 0.0e+00       1.9 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj 383  bound 383  gap 0.0e+00      95.3 s
+   trnopt (neuron) [run 2]      optimal          obj 383  bound 383  gap 0.0e+00       1.7 s
+
+indset_300_a4_s2: 970 rows x 300 cols, 2048 nonzeros, 300 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj -131  bound -131  gap 0.0e+00       2.5 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj -131  bound -131  gap 0.0e+00      74.8 s
+   trnopt (neuron) [run 2]      optimal          obj -131  bound -131  gap 0.0e+00       3.6 s
+
+cauction_80x400_s2: 80 rows x 400 cols, 2243 nonzeros, 400 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj -5222.84  bound -5223.32  gap 9.2e-05       3.7 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj -5222.84  bound -5222.84  gap 4.5e-15     110.4 s
+   trnopt (neuron) [run 2]      optimal          obj -5222.84  bound -5222.84  gap 4.5e-15      15.4 s
+
+facility_40x30_s2: 1271 rows x 1230 cols, 4860 nonzeros, 30 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 6885.36  bound 6885.36  gap 0.0e+00       0.7 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj 6885.36  bound 6885.36  gap 1.3e-16      36.3 s
+   trnopt (neuron) [run 2]      optimal          obj 6885.36  bound 6885.36  gap 1.3e-16       7.0 s
+
+setcover_400x800_s3: 400 rows x 800 cols, 15616 nonzeros, 800 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 262  bound 262  gap 0.0e+00       3.7 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj 262  bound 262  gap 4.3e-16      66.6 s
+   trnopt (neuron) [run 2]      optimal          obj 262  bound 262  gap 4.3e-16       3.9 s
+
+setcover_500x1000_s3: 500 rows x 1000 cols, 9911 nonzeros, 1000 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj 917  bound 917  gap 0.0e+00      12.7 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj 917  bound 917  gap 0.0e+00     113.5 s
+   trnopt (neuron) [run 2]      optimal          obj 917  bound 917  gap 0.0e+00      21.0 s
+
+indset_500_a4_s3: 1732 rows x 500 cols, 3590 nonzeros, 500 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj -231  bound -231  gap 0.0e+00       3.3 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj -231  bound -231  gap 0.0e+00      78.2 s
+   trnopt (neuron) [run 2]      optimal          obj -231  bound -231  gap 0.0e+00       4.8 s
+
+indset_800_a4_s3: 2808 rows x 800 cols, 5804 nonzeros, 800 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj -375  bound -375  gap 0.0e+00       4.5 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      optimal          obj -375  bound -375  gap 0.0e+00      87.8 s
+   trnopt (neuron) [run 2]      optimal          obj -375  bound -375  gap 0.0e+00      10.7 s
+
+cauction_150x700_s3: 150 rows x 700 cols, 3927 nonzeros, 700 integer
+On-device RNG not available - CPU RNG will be used
+   highs                        optimal          obj -9422.48  bound -9423.35  gap 9.1e-05      43.1 s
+On-device RNG not available - CPU RNG will be used
+   trnopt (neuron) [run 1]      maxTimeLimit     obj -2448.02  bound -9854.18  gap 3.0e+00     129.7 s
+   trnopt (neuron) [run 2]      optimal          obj -9422.48  bound -9422.48  gap 1.9e-16      41.6 s
+
+Wrote /home/ubuntu/trnopt/results/pyomo_trn1.2xlarge-families_2026-10-28.csv

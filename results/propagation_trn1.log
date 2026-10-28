@@ -1,0 +1,145 @@
+On-device RNG not available - CPU RNG will be used
+
+setcover_200x400_s2: 200 x 400, 3919 nnz, dense 0.1M entries
+   numpy sparse               0.092 s / round
+   dense on cpu-float32       0.657 s / round  (first call 0.9 s)  same roundings 100%
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+2026-Oct-28 03:47:54.262930 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.266028 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.269024 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.272077 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.275134 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.278162 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.281156 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:47:54.284174 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron         failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+2026-Oct-28 03:48:16.791751 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.794833 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.797846 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.802504 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.808698 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.814874 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.821024 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:16.827200 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron-eager   failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+
+indset_300_a4_s2: 970 x 300, 2048 nnz, dense 0.3M entries
+   numpy sparse               0.041 s / round
+   dense on cpu-float32       2.993 s / round  (first call 3.1 s)  same roundings 100%
+2026-Oct-28 03:48:35.890009 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:35.897004 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:35.903953 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:37.248654 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:37.406448 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:38.601679 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:38.607964 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:38.614493 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron         failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+2026-Oct-28 03:48:59.748837 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.755309 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.761597 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.767859 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.774118 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.780373 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.786559 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:48:59.792804 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron-eager   failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+
+cauction_80x400_s2: 80 x 400, 2243 nnz, dense 0.0M entries
+   numpy sparse               0.035 s / round
+   dense on cpu-float32       0.225 s / round  (first call 0.2 s)  same roundings 100%
+2026-Oct-28 03:49:04.639194 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.645628 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.651819 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.658097 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.664356 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.670939 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.677142 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:04.683343 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron         failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+2026-Oct-28 03:49:18.373699 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.380025 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.386282 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.392568 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.398824 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.405055 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.411243 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:49:18.417499 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron-eager   failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+
+facility_40x30_s2: 1271 x 1230, 4860 nnz, dense 1.6M entries
+   numpy sparse               0.139 s / round
+   dense on cpu-float32      16.835 s / round  (first call 16.9 s)  same roundings 100%
+   dense on neuron            0.677 s / round  (first call 14.1 s)  same roundings 100%
+   dense on neuron-eager      3.511 s / round  (first call 33.6 s)  same roundings 0%
+
+neos-911970.mps.gz: 107 x 888, 3408 nnz, dense 0.1M entries
+   numpy sparse               0.131 s / round
+   dense on cpu-float32       1.390 s / round  (first call 1.4 s)  same roundings 100%
+2026-Oct-28 03:51:39.329261 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:39.336281 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:39.343231 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:40.670618 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:40.863625 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:41.987332 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:41.995303 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:51:42.001568 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron         failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+2026-Oct-28 03:52:03.523933 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.530497 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.536709 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.542956 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.549236 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.555521 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.561653 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:52:03.567803 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron-eager   failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+
+neos-4954672-berkel.mps.gz: 1848 x 1533, 8007 nnz, dense 3.6M entries
+   numpy sparse               0.739 s / round
+   dense on cpu-float32      88.124 s / round  (first call 88.3 s)  same roundings 100%
+2026-Oct-28 03:58:22.238993 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.245255 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.251409 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.257649 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.263867 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.270070 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.276230 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:22.282417 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron         failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+2026-Oct-28 03:58:58.387910 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.394267 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.400545 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.406848 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.413165 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.419415 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.425672 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+2026-Oct-28 03:58:58.431962 95101:95116 ERROR  TDRV:exec_request_process_errors             [ND 0][NC 0] Out of bounds access on model module.neff
+   dense on neuron-eager   failed: RuntimeError: NRT Execution error occurred on Neuron for operation=aten::gather
+error message="NRT EXECUTION FAILED: Async execution failed with NRT status: 1006, one or more indirect memcopies and/or embedding upd
+
+nu25-pr12.mps.gz: 2313 x 5868, 17712 nnz, dense 26.4M entries
+   numpy sparse               1.989 s / round
+   (too large for the dense version)
+pump neos-911970.mps.gz   cpu-float32  run 1:   8.4 s, 40 rounds, 0 solutions, best -
+pump neos-911970.mps.gz   cpu-float32  run 2:   8.4 s, 40 rounds, 0 solutions, best -
+pump neos-911970.mps.gz   neuron       run 1:  15.7 s, 40 rounds, 0 solutions, best -
+pump neos-911970.mps.gz   neuron       run 2:  14.2 s, 40 rounds, 0 solutions, best -
+pump neos-4954672-berkel. cpu-float32  run 1:   8.1 s, 12 rounds, 42 solutions, best 1.02181e+07
+pump neos-4954672-berkel. cpu-float32  run 2:   8.1 s, 12 rounds, 42 solutions, best 1.02181e+07
+pump neos-4954672-berkel. neuron       run 1:  40.6 s, 12 rounds, 45 solutions, best 1.02181e+07
+pump neos-4954672-berkel. neuron       run 2:   8.7 s, 12 rounds, 45 solutions, best 1.02181e+07
+pump nu25-pr12.mps.gz     cpu-float32  run 1:  23.3 s, 9 rounds, 13 solutions, best 54875
+pump nu25-pr12.mps.gz     cpu-float32  run 2:  23.1 s, 9 rounds, 13 solutions, best 54875
+pump nu25-pr12.mps.gz     neuron       run 1:  59.6 s, 9 rounds, 13 solutions, best 54875
+pump nu25-pr12.mps.gz     neuron       run 2:  25.4 s, 9 rounds, 13 solutions, best 54875
