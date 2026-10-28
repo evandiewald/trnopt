@@ -43,8 +43,10 @@ class Backend:
     compile_backend: str | None = None       # None = PyTorch's default compiler for the device
     lazy: bool = False                       # PyTorch/XLA-style lazy execution: sync() after each iteration
     spmv: str = "torch"                      # how to multiply by K: "torch" (dense or sparse per `dense`),
-                                             # "auto" (Trainium: dense if K is small enough, else "nki"),
+                                             # "auto" (Trainium: dense if K is small enough, else "nki-op"),
                                              # "nki" (custom Trainium kernel, sliced-ELL layout),
+                                             # "nki-op" (the same kernel as a custom op inside the compiled
+                                             #   graph, see nki_op.py; falls back to "nki" if that fails),
                                              # "nki-sim" (the same kernel in NKI's CPU simulator, for testing),
                                              # "metal" (custom Apple GPU kernel, sliced-ELL layout) or
                                              # "metal-ref" (the Metal kernel's arithmetic in plain PyTorch, for testing)
@@ -52,7 +54,8 @@ class Backend:
     # spmv="auto": dense up to this many entries (~80 MB in float32), the NKI kernel above it. Measured on trn1
     # (2026-10-27): dense won outright on small K (setcover 1000x1000: 2.4 s vs 4.5 s for strong branching),
     # tied at 2.8M entries (berkel) and lost slightly at 13.6M (nu25, B=1024); NKI is the only option
-    # for the large MIPLIB instances.
+    # for the large MIPLIB instances. Above the cutoff, "nki-op": 3-7% faster per iteration than "nki" and
+    # quicker to compile (results/nki_op_2026-10-28.md).
     auto_dense_entries: int = 20_000_000
 
     @classmethod
@@ -149,13 +152,13 @@ class MatVec:
         m, n = K.shape
         spmv = backend.spmv
         if spmv == "auto":
-            spmv = "torch" if m * n <= backend.auto_dense_entries else "nki"
+            spmv = "torch" if m * n <= backend.auto_dense_entries else "nki-op"
             if spmv == "torch":
                 backend = replace(backend, dense=True)
         self.spmv = spmv                         # the method actually used for this matrix
         self.dense = backend.dense and spmv == "torch"
         self.be = backend
-        if spmv in ("nki", "nki-sim"):
+        if spmv in ("nki", "nki-op", "nki-sim"):
             self._init_nki(K)
             return
         if spmv in ("metal", "metal-ref"):
@@ -179,6 +182,8 @@ class MatVec:
     def K(self, x: torch.Tensor) -> torch.Tensor:
         if self.spmv in ("metal", "metal-ref"):
             return self._mK.matmul(x).to(x.dtype)
+        if self.spmv == "nki-op":
+            return self._nki_op_apply("K", x)
         if self.spmv != "torch":
             return self._nki_apply("K", x)
         return self._K @ x
@@ -186,6 +191,8 @@ class MatVec:
     def KT(self, y: torch.Tensor) -> torch.Tensor:
         if self.spmv in ("metal", "metal-ref"):
             return self._mKT.matmul(y).to(y.dtype)
+        if self.spmv == "nki-op":
+            return self._nki_op_apply("KT", y)
         if self.spmv != "torch":
             return self._nki_apply("KT", y)
         return self._KT @ y
@@ -195,10 +202,42 @@ class MatVec:
         from .nki_sell import kernel_tables
         from .sell import build_sell
         self._sK, self._sKT = build_sell(K), build_sell(K.T.tocsr())
-        dev = self.be.device if self.spmv == "nki" else "cpu"
+        dev = "cpu" if self.spmv == "nki-sim" else self.be.device
         tabs = lambda S: tuple(torch.as_tensor(t, device=dev) for t in kernel_tables(S))
         self._K_tabs, self._KT_tabs = tabs(self._sK), tabs(self._sKT)
         self._kernels = {}                       # (which, B) -> kernel; one compile per batch size
+        if self.spmv == "nki-op":
+            try:
+                from . import nki_op
+                nki_op.register()
+                self._layout = {"K": nki_op.layout_id(self._sK), "KT": nki_op.layout_id(self._sKT)}
+                self._op_checked = set()         # (which, B) the op has already run eagerly without error
+            except Exception as e:               # no torch_neuronx, or an API it doesn't have
+                warnings.warn(f"spmv='nki-op' unavailable ({type(e).__name__}: {e}); using 'nki'")
+                self.spmv = "nki"
+
+    # The kernel as a custom op (nki_op.py): torch.compile keeps it in the graph, no graph break.
+    def _nki_op_apply(self, which: str, x: torch.Tensor) -> torch.Tensor:
+        S, tabs = (self._sK, self._K_tabs) if which == "K" else (self._sKT, self._KT_tabs)
+        X = x.reshape(x.shape[0], -1)
+        if X.dtype != torch.float32:
+            X = X.to(torch.float32)
+        args = (*tabs, X.contiguous(), S.shape[0], self._layout[which])
+        key = (which, X.shape[1])
+        if torch.compiler.is_compiling() or key in self._op_checked:
+            Y = torch.ops.trnopt.sell_matmul(*args)
+        else:
+            # The first eager call per (which, B) compiles the kernel through the op. If that fails, fall back
+            # for good. (A failure inside a torch.compile'd graph can't be caught here; it surfaces as is.)
+            try:
+                Y = torch.ops.trnopt.sell_matmul(*args)
+                self._op_checked.add(key)
+            except Exception as e:
+                warnings.warn(f"spmv='nki-op' failed ({type(e).__name__}: {e}); using 'nki'")
+                self.spmv = "nki"
+                return self._nki_apply(which, x)
+        Y = Y.to(x.dtype)
+        return Y[:, 0] if x.dim() == 1 else Y
 
     # torch.compile can't trace into an nki.jit call, so it stops here: the code around each multiply
     # still gets fused, and the kernel runs as its own call between the compiled pieces.

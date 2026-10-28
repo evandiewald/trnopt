@@ -90,6 +90,13 @@ def kernel_tables(S: SELL) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return cols, S.vals.astype(np.float32), scatter_passes(S)[0]
 
 
+def layout_key(S: SELL) -> tuple:
+    """Everything about S that make_sell_kernel bakes into a kernel, apart from B (offsets follow from widths)."""
+    m, n = S.shape
+    has_splits = len(np.unique(S.out_rows[S.out_rows >= 0])) < int((S.out_rows >= 0).sum())
+    return (m, n, S.widths, has_splits, scatter_passes(S)[1])
+
+
 def make_sell_kernel(S: SELL, B: int):
     """Build a kernel specialized to one matrix's slice layout and one batch size B.
 
@@ -103,11 +110,10 @@ def make_sell_kernel(S: SELL, B: int):
     """
     if not HAVE_NKI:
         raise ImportError("the nki package is not installed; see the README for how to get it")
-    m, n = S.shape
     widths, offsets, num_slices = S.widths, S.offsets, S.num_slices
-    has_splits = len(np.unique(S.out_rows[S.out_rows >= 0])) < int((S.out_rows >= 0).sum())
-    passes = scatter_passes(S)[1]
-    key = (m, n, widths, has_splits, passes, B)            # offsets follow from widths
+    lk = layout_key(S)
+    m, n, _, has_splits, passes = lk
+    key = lk + (B,)
     if key in _KERNELS:
         return _KERNELS[key]
     first_pass = tuple(int(x) for x in np.concatenate([[0], np.cumsum(passes)[:-1]]))

@@ -8,6 +8,7 @@ Backends:
     neuron        TorchNeuron, dense K, torch.compile with the "neuron" backend
     neuron-nki    TorchNeuron, sparse K through our NKI sliced-ELL kernel (nki_sell.py), compiled
                   around the kernel calls (torch.compile can't trace into nki.jit, so it breaks there)
+    neuron-nki-op the same kernel as a custom op (nki_op.py), so the compiled step has no graph breaks
 
 Writes results/trn_<instance-type>_<date>.csv after every measurement (same columns as the Mac
 CSV), so a run cut short still leaves its data behind.
@@ -36,6 +37,7 @@ BACKENDS = {
     "cpu-float32": lambda: Backend.preset("cpu", dtype=torch.float32),
     "neuron": lambda: Backend.preset("neuron"),
     "neuron-nki": lambda: Backend.preset("neuron", spmv="nki", dense=False),
+    "neuron-nki-op": lambda: Backend.preset("neuron", spmv="nki-op", dense=False),   # the kernel inside the graph
 }
 KEYS = ["B", "backend", "cols", "instance", "n_optimal", "rows", "sec_per_lp", "seconds", "section", "us_per_iter",
         "distinct_lps"]

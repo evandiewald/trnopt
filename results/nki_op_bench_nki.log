@@ -1,0 +1,11 @@
+On-device RNG not available - CPU RNG will be used
+chromaticindex512-7.mps.gz (33791 x 36864, 135156 nnz), 128 branching LPs, backend nki
+  backend=nki, spmv_used=nki, B=32, first_solve_s=51.7, graphs=8, breaks=7, us_per_iter=8438.5, e2e_s=3.839, e2e_iters=448, e2e_us_per_iter=8551.2, n_optimal=32, distinct_lps=32
+  backend=nki, spmv_used=nki, B=128, first_solve_s=45.35, graphs=8, breaks=7, us_per_iter=11303.3, e2e_s=5.996, e2e_iters=512, e2e_us_per_iter=11657.6, n_optimal=128, distinct_lps=128
+neos-4300652-rahue.mps.gz (76992 x 33003, 183616 nnz), 128 branching LPs, backend nki
+  backend=nki, spmv_used=nki, B=32, first_solve_s=58.08, graphs=8, breaks=7, us_per_iter=13702.0, e2e_s=21.637, e2e_iters=1600, e2e_us_per_iter=13517.7, n_optimal=32, distinct_lps=32
+  backend=nki, spmv_used=nki, B=128, first_solve_s=56.62, graphs=8, breaks=7, us_per_iter=17128.8, e2e_s=26.281, e2e_iters=1600, e2e_us_per_iter=16409.8, n_optimal=128, distinct_lps=128
+neos-933966.mps.gz (12047 x 31762, 180618 nnz), 128 branching LPs, backend nki
+  backend=nki, spmv_used=nki, B=32, first_solve_s=35.4, graphs=8, breaks=7, us_per_iter=8905.5, e2e_s=5.144, e2e_iters=576, e2e_us_per_iter=8924.7, n_optimal=32, distinct_lps=32
+  backend=nki, spmv_used=nki, B=128, first_solve_s=36.15, graphs=8, breaks=7, us_per_iter=9954.4, e2e_s=5.828, e2e_iters=576, e2e_us_per_iter=10082.3, n_optimal=128, distinct_lps=128
+Wrote /home/ubuntu/trnopt-nkiop/results/nki_op_2026-10-28.csv

@@ -59,6 +59,7 @@ METHODS = {
     "cpu-float32": ("trnopt CPU", lambda: Backend.preset("cpu-float32")),
     "mps-metal": ("trnopt GPU", lambda: Backend.preset("mps-metal")),
     "neuron-nki": ("trnopt trn1 NKI", lambda: Backend.preset("neuron", spmv="nki", dense=False)),
+    "neuron-nki-op": ("trnopt trn1 NKI op", lambda: Backend.preset("neuron", spmv="nki-op", dense=False)),
     "neuron": ("trnopt trn1", lambda: Backend.preset("neuron")),                 # dense if K fits, else NKI
     "neuron-dense": ("trnopt trn1 dense", lambda: Backend.preset("neuron", spmv="torch")),
     "neuron-2core": ("trnopt trn1 x2", None),                                    # both NeuronCores, see trn_two_cores.py
