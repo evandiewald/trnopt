@@ -593,3 +593,24 @@ def test_mip_after_multithreaded_highs():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr[-2000:]
+
+
+def test_warm_up_runs_a_stream():
+    """batch.warm_up runs the programs a stream of that width uses and reports how long it took."""
+    from trnopt.batch import warm_up
+    t = warm_up(random_lp(40, 10, 20, seed=2), 16, Backend.preset("cpu-float32"))
+    assert 0 < t < 60
+
+
+@needs_neuron
+def test_mip_on_neuron_warms_up_and_matches_highs():
+    """On Neuron the pump's and strong branching's programs are warmed up before those phases run (time
+    reported as times["warmup"]), and the answer is still HiGHS's optimum."""
+    from trnopt.generators import set_cover
+    from trnopt.mip import solve_mip
+    from trnopt.reference import solve_highs_mip
+    lp = set_cover(60, 120, 0.06, seed=5)
+    ref = solve_highs_mip(lp, 60)
+    r = solve_mip(lp, "reliability_trnopt", time_limit=300, backend="neuron", pump=16)
+    assert r.status == "optimal" and abs(r.objective - ref.objective) <= 1e-6 * (1 + abs(ref.objective))
+    assert r.times.get("warmup", 0) > 0

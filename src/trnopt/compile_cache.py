@@ -16,8 +16,14 @@ What gets compiled, and where it's kept
 
 These caches are keyed on the program itself (graph, input shapes and dtypes, compiler version),
 not on which LP it came from: re-solving an instance, or any instance of the same size, in a new
-process skips the compiler. What still runs every process is tracing the Python step function,
-which is cheap next to a compile.
+process skips the compiler. What still runs every process is tracing the Python step function and
+loading each NEFF onto the device: a few seconds per (matrix, batch size), up to ~20 s on the large
+MIPLIB models (measured on trn1, 2026-10-28). mip.solve_mip does it in the background (batch.warm_up).
+
+One catch: a torch.compile'd graph's HLO carries source locations (file path and line), so its key
+changes when trnopt is installed at another path, or when batch.py / pdlp.py are edited above the
+compiled functions. Those graphs (two per matrix and batch size) then compile again; the eager ops'
+NEFFs, most of the cache by count, still hit.
 
 configure() points all of them at one directory, TRNOPT_CACHE_DIR (default ~/.cache/trnopt), so
 they survive reboots and can be shared: put it on EFS, or copy it to the next instance. It never

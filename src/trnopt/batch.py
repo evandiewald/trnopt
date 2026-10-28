@@ -173,6 +173,23 @@ def solve_pdlp_stream(lp: LP, n_lps: int, slots: int, lower=None, upper=None, c=
     return first
 
 
+def warm_up(lp: LP, slots: int, backend: Backend, ruiz_iters: int = PDLPOptions.ruiz_iters) -> float:
+    """Run every device program a `slots`-wide stream on lp's matrix uses, once. Returns the seconds it took.
+
+    On Neuron each (matrix shape, slot count) has its own programs: the compiled step and measurements, and
+    the eager ops that load slots and record results. The first call that needs them compiles them (35-90 s
+    on the large MIPLIB models) or, with a warm persistent cache, loads them (a few seconds). A phase with
+    its own time budget (the feasibility pump, a strong-branching call) would otherwise spend that budget
+    compiling, and measure its speed with the compile included. Two evaluation intervals cover every code
+    path: load, step, measurements, restart, recording results.
+    """
+    t = time.perf_counter()
+    opts = PDLPOptions(backend=backend, ruiz_iters=ruiz_iters, max_iters=2 * PDLPOptions.eval_every,
+                       time_limit=float("inf"))
+    solve_pdlp_stream(lp, slots, slots, opts=opts)
+    return time.perf_counter() - t
+
+
 _SETUP_CACHE: dict = {}
 
 

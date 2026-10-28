@@ -34,7 +34,8 @@ from __future__ import annotations
 import heapq
 import itertools
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 
 import highspy
@@ -47,6 +48,7 @@ from .pdlp import PDLPOptions
 from .reference import to_highs_lp
 
 INT_TOL = 1e-6
+MIN_STRONG = 8           # strong branching's time cap never goes below this many candidates per node
 
 
 @dataclass
@@ -249,6 +251,45 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         raise ValueError(f"branching must be one of {sorted(rules)}")
     rule, engine = rules[branching]
     t0 = time.perf_counter()
+    be = Backend.preset(backend) if isinstance(backend, str) else backend
+    # Fixed shapes (Neuron): every (matrix, slot count) has its own device programs, compiled on first use
+    # (35-100 s on large MIPLIB models) or loaded from the persistent cache (a few seconds). batch.warm_up
+    # does that ahead of time, in one background thread: the pump's programs while FJ, cuts and the root LP
+    # run on the CPU, strong branching's while the search goes on without it. The pump waits for its own;
+    # strong branching waits at most its root share, so a compile can't eat a phase's budget, distort the
+    # strong-branching speed the candidate cap is computed from, or (being uninterruptible) overrun
+    # time_limit. Only one thread uses the device at a time: nothing runs on it while a warm-up does.
+    # Strong branching uses at most two slot counts per solve (strong_ready), both fixed by the problem
+    # rather than by timings, so the next process finds them in the persistent cache.
+    static = be.compile and be.device.startswith("neuron")
+    warm_pool = None
+    warm_jobs: dict = {}                               # (id(K), slots) -> Future of the warm-up's seconds
+    strong_sizes: list = []                            # slot counts strong branching uses (Neuron)
+    pass_time: dict = {}                               # slot count -> seconds per pass, last strong call
+
+    def warm_start(lp_, B):
+        nonlocal warm_pool
+        key = (id(lp_.K), B)
+        if key not in warm_jobs:
+            from .batch import warm_up
+            if warm_pool is None:
+                warm_pool = ThreadPoolExecutor(1, thread_name_prefix="trnopt-warm-up")
+            warm_jobs[key] = warm_pool.submit(warm_up, lp_, B, be)
+
+    def warm_ready(wait):
+        """True once every warm-up started has finished, waiting at most `wait` seconds (times["warmup"])."""
+        t = time.perf_counter()
+        try:
+            for f in list(warm_jobs.values()):
+                f.result(timeout=max(0.0, wait - (time.perf_counter() - t)))      # re-raises its errors
+            return True
+        except FutureTimeout:
+            return False
+        finally:
+            times["warmup"] = times.get("warmup", 0.0) + time.perf_counter() - t
+
+    if static and pump:
+        warm_start(lp, pump)                           # feasibility_pump runs `pump` slots on the uncut model
     fj_res = None
     if fj and lp.integer is not None and lp.integer.any():
         try:
@@ -262,7 +303,6 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         from .cuts import root_cuts
         lp, cut_info = root_cuts(lp, rounds=cuts, max_cuts=cut_max, time_limit=min(60.0, 0.2 * time_limit),
                                  verbose=verbose)
-    be = Backend.preset(backend) if isinstance(backend, str) else backend
     ints = np.flatnonzero(lp.integer)
     if engine == "trnopt":
         mem_cap = max(64, int(2e8 // (2 * (lp.n + lp.m))))
@@ -284,6 +324,32 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
 
     def elapsed():
         return time.perf_counter() - t0
+
+    def strong_slots(n_lps):
+        """Slots for a strong-branching batch of n_lps LPs. Neuron: the cheapest of the warmed-up sizes
+        (strong_sizes, see strong_ready), by passes (LPs stream through the slots) x measured seconds per pass;
+        a size not measured yet counts as free, so each gets measured once."""
+        if not static:
+            return be.batch_slots(n_lps, slots)
+        return min(strong_sizes, key=lambda b: (-(-n_lps // b) * pass_time.get(b, 0.0), b))
+
+    def strong_ready(n_cand, wait):
+        """Neuron: whether strong branching on n_cand candidates can run now without compiling, after waiting
+        at most `wait` seconds for warm-ups. The first call's size is warmed up first; once a call has run, the
+        size of the smallest node batch (MIN_STRONG candidates) too, if the warm-ups so far suggest it leaves
+        at least as much time again."""
+        if not static:
+            return True
+        if not strong_sizes:
+            strong_sizes.append(be.batch_slots(2 * min(n_cand, 128) + 1, slots))   # see the first-call split
+        small = be.batch_slots(2 * MIN_STRONG + 1, slots)
+        if pass_time and small not in strong_sizes and small < strong_sizes[0]:
+            done = [f.result() for f in warm_jobs.values() if f.done()]
+            if not done or max(done) <= 0.5 * (time_limit - elapsed()):
+                strong_sizes.append(small)
+        for b in strong_sizes:
+            warm_start(lp, b)
+        return warm_ready(wait)
 
     def try_incumbent(x, obj, how):
         nonlocal incumbent, x_inc
@@ -362,6 +428,8 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
     def run_pump(node, x):
         """Batched feasibility pump from this node's LP solution (pump.py); feasible points become incumbents."""
         from .pump import feasibility_pump
+        if static and not warm_ready(time_limit - elapsed()):    # its programs (warm_start at the top)
+            return
         t = time.perf_counter()
 
         def repair(r_ints):                            # fix the integers, solve exactly for the continuous ones
@@ -398,6 +466,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         for j in cand:
             down_up.append((int(j), node.lower[j], np.floor(x[j])))
             down_up.append((int(j), np.ceil(x[j]), node.upper[j]))
+        B = strong_slots(len(down_up) + 1) if engine == "trnopt" else None   # + 1: the parent (below)
         t = time.perf_counter()
         counts["strong_lps"] += len(down_up)
         counts["strong_nodes"] += 1
@@ -439,10 +508,11 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     return out
                 return get
 
-            r = solve_pdlp_stream(lp, len(down_up_p), be.batch_slots(len(down_up_p), slots), lower=rows(node.lower, nlo),
+            r = solve_pdlp_stream(lp, len(down_up_p), B, lower=rows(node.lower, nlo),
                                   upper=rows(node.upper, nup), x0=x, y0=y,
                                   opts=PDLPOptions(tol=strong_tol, backend=be, max_iters=strong_iters,
                                                    time_limit=max(1.0, time_limit - elapsed())))
+            pass_time[B] = (time.perf_counter() - t) / -(-len(down_up_p) // B)
             infeasible = np.array([s == "infeasible" for s in r.status[:-1]])
             objs = list(np.where(infeasible, np.inf, np.asarray(r.objective[:-1]) - r.objective[-1] + node.bound))
         times["strong"] += time.perf_counter() - t
@@ -510,7 +580,10 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         f = np.abs(x[fractional] - np.round(x[fractional]))
         order = fractional[np.argsort(-f, kind="stable")]
         exact = None
-        if rule == "most_fractional" or (strong_depth is not None and depth > strong_depth and rule == "strong"):
+        if rule == "most_fractional" or (strong_depth is not None and depth > strong_depth and rule == "strong") \
+                or (rule == "strong" and engine == "trnopt"
+                    and not strong_ready(len(order) if max_candidates is None else min(len(order), max_candidates),
+                                         time_limit - elapsed())):
             j, k = int(order[0]), None
         else:
             if rule == "strong":
@@ -532,6 +605,9 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     if max_candidates is not None:
                         cand = cand[:max_candidates]
             first = None
+            if len(cand) and engine == "trnopt" and rule == "reliability" \
+                    and not strong_ready(len(cand), 0.10 * time_limit if nodes == 1 else 0.0):
+                cand = cand[:0]                        # still compiling: pseudocost estimates only
             if len(cand) and engine == "trnopt":
                 # time cap: root strong branching gets <= 10% of the time limit, later nodes <= 2% each, at the
                 # cost per strong LP measured so far (first call: at most 128 candidates, to measure it)
@@ -539,7 +615,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                 if counts["strong_lps"] == 0 and len(cand) > 128:
                     first = strong_scores(node, x, y, basis, cand[:128], depth)[0]   # measure the cost
                 rate = times["strong"] / max(1, counts["strong_lps"])              # seconds per strong LP
-                cap = len(cand) if counts["strong_lps"] == 0 else max(8, int(share / (2 * max(rate, 1e-6))))
+                cap = len(cand) if counts["strong_lps"] == 0 else max(MIN_STRONG, int(share / (2 * max(rate, 1e-6))))
                 if first is not None:
                     cap = max(128, cap)
                 cand = cand[:cap]
@@ -619,6 +695,9 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
 
     if pool is not None:
         pool.shutdown()
+    if warm_pool is not None:                          # a warm-up still running finishes in the background
+        counts["warmup_seconds"] = round(sum(f.result() for f in warm_jobs.values() if f.done() and not f.exception()), 2)
+        warm_pool.shutdown(wait=False, cancel_futures=True)
     if status == "optimal":
         best_bound = incumbent if not heap or best_bound == -np.inf else best_bound
         if incumbent == np.inf:
