@@ -21,18 +21,19 @@ import torch
 from .nki_sell import layout_key, make_sell_kernel
 from .sell import SELL
 
-_LAYOUTS: list = []          # layout id -> SELL with that layout (its structure is what the kernel bakes in)
-_LAYOUT_IDS: dict = {}       # layout_key(S) -> layout id
+_LAYOUTS: list = []          # layout id -> (SELL with that layout, ordered): what the kernel bakes in
+_LAYOUT_IDS: dict = {}       # layout_key(S, ordered) -> layout id
 _KERNELS: dict = {}          # (layout id, B) -> wrapped kernel; make_sell_kernel's own lookup costs a pass over S
 _OP = None                   # the registered op, once register() has succeeded
 
 
-def layout_id(S: SELL) -> int:
-    """A stable integer for S's layout, for the life of the process. Equal layouts share an id."""
-    key = layout_key(S)
+def layout_id(S: SELL, ordered: bool = False) -> int:
+    """A stable integer for S's layout (and output order, see make_sell_kernel), for the life of the process.
+    Equal layouts share an id."""
+    key = layout_key(S, ordered)
     if key not in _LAYOUT_IDS:
         _LAYOUT_IDS[key] = len(_LAYOUTS)
-        _LAYOUTS.append(S)
+        _LAYOUTS.append((S, ordered))
     return _LAYOUT_IDS[key]
 
 
@@ -55,7 +56,8 @@ def register():
         kernel = _KERNELS.get(key)
         if kernel is None:
             # wrap_nki: the traceable form of the kernel (torch_neuronx's own nki_op kernels call it this way)
-            kernel = _KERNELS[key] = wrap_nki(make_sell_kernel(_LAYOUTS[layout], X.shape[1]))
+            S, ordered = _LAYOUTS[layout]
+            kernel = _KERNELS[key] = wrap_nki(make_sell_kernel(S, X.shape[1], ordered))
         return kernel(cols, vals, out_rows, X)
 
     _OP = sell_matmul

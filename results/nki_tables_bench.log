@@ -1,0 +1,12 @@
+On-device RNG not available - CPU RNG will be used
+chromaticindex512-7.mps.gz (33791 x 36864, 135156 nnz), 128 branching LPs, backend nki-op
+  backend=nki-op, spmv_used=nki-op, B=32, first_solve_s=59.39, graphs=2, breaks=0, us_per_iter=7542.3, e2e_s=3.432, e2e_iters=448, e2e_us_per_iter=7653.2, n_optimal=32, distinct_lps=32
+  backend=nki-op, spmv_used=nki-op, B=128, first_solve_s=50.47, graphs=2, breaks=0, us_per_iter=10248.1, e2e_s=5.441, e2e_iters=512, e2e_us_per_iter=10573.8, n_optimal=128, distinct_lps=128
+neos-4300652-rahue.mps.gz (76992 x 33003, 183616 nnz), 128 branching LPs, backend nki-op
+  backend=nki-op, spmv_used=nki-op, B=32, first_solve_s=75.3, graphs=2, breaks=0, us_per_iter=12299.7, e2e_s=19.367, e2e_iters=1600, e2e_us_per_iter=12099.2, n_optimal=32, distinct_lps=32
+  backend=nki-op, spmv_used=nki-op, B=128, first_solve_s=70.12, graphs=2, breaks=0, us_per_iter=15907.6, e2e_s=24.37, e2e_iters=1600, e2e_us_per_iter=15213.6, n_optimal=128, distinct_lps=128
+neos-933966.mps.gz (12047 x 31762, 180618 nnz), 128 branching LPs, backend nki-op
+  backend=nki-op, spmv_used=nki-op, B=32, first_solve_s=44.76, graphs=2, breaks=0, us_per_iter=7975.4, e2e_s=4.603, e2e_iters=576, e2e_us_per_iter=7986.8, n_optimal=32, distinct_lps=32
+  backend=nki-op, spmv_used=nki-op, B=128, first_solve_s=44.19, graphs=2, breaks=0, us_per_iter=9104.5, e2e_s=5.316, e2e_iters=576, e2e_us_per_iter=9187.8, n_optimal=128, distinct_lps=128
+Wrote results/nki_tables_2026-10-28.csv
+exit 0

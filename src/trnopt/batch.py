@@ -189,7 +189,7 @@ def _shared_setup(K: sp.csr_matrix, ruiz_iters: int, be: Backend):
         return hit[1]
     d_r, d_c = _scale(K, ruiz_iters)
     Ks = (sp.diags(d_r) @ K @ sp.diags(d_c)).tocsr()
-    out = (d_r, d_c, Ks, _operator_norm(Ks), MatVec(Ks, be))
+    out = (d_r, d_c, Ks, _operator_norm(Ks), MatVec(Ks, be, permute=True))
     if len(_SETUP_CACHE) > 8:
         _SETUP_CACHE.clear()
     _SETUP_CACHE[key] = (K, out)
@@ -206,11 +206,19 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
 
     # ---- shared: scaling and step size (from K alone) ------------------------------------
     d_r, d_c, Ks, knorm, mv = _shared_setup(lp.K, opts.ruiz_iters, be)
+    ineq_np = np.arange(m) >= lp.m_eq                     # ">=" rows
+    # The NKI kernel's ordered mode (MatVec permute=True) keeps x and y in its own order: permute every
+    # per-variable and per-row array on the way in, and the solutions on the way out (see the return).
+    px, py = mv.col_perm, mv.row_perm
+    if px is not None:
+        d_r, d_c, ineq_np = d_r[py], d_c[px], ineq_np[py]
+        reorder = lambda get, p: (lambda ids: np.asarray(get(ids))[:, p])
+        get_c, get_lo, get_up, get_x0 = (reorder(f, px) for f in (get_c, get_lo, get_up, get_x0))
+        get_q, get_y0 = reorder(get_q, py), reorder(get_y0, py)
     eta = opts.step_safety / knorm if knorm > 0 else 1.0
     T = be.tensor
     dr_t, dc_t = T(d_r)[:, None], T(d_c)[:, None]
-    ineq = torch.zeros(m, 1, dtype=torch.bool, device=be.device)
-    ineq[lp.m_eq :] = True
+    ineq = torch.as_tensor(ineq_np[:, None]).to(be.device)
     infeas_tol = opts.infeasibility_tol if opts.infeasibility_tol is not None else (
         1e-8 if be.dtype == torch.float64 else 1e-4)
 
@@ -452,6 +460,8 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
     # LPs never loaded (time ran out) keep status "time_limit".
     R_status[next_lp:] = "time_limit"
     total = max(it, 1)
+    if px is not None:                                    # back to the LP's own order
+        R_x[:, px], R_y[:, py] = R_x.copy(), R_y.copy()
     return BatchResult(
         status=list(R_status), objective=R_obj, x=R_x, y=R_y, iterations=R_it, restarts=R_rs,
         primal_residual=R_rp, dual_residual=R_rd, gap=R_gap, total_iterations=it,

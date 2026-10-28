@@ -1,0 +1,7 @@
+instance,rows,cols,nnz,backend,spmv_used,B,first_solve_s,graphs,breaks,us_per_iter,e2e_s,e2e_iters,e2e_us_per_iter,n_optimal,distinct_lps
+chromaticindex512-7.mps.gz,33791,36864,135156,nki-op,nki-op,32,59.3,2,0,6294.5,2.888,448,6438.2,32,32
+chromaticindex512-7.mps.gz,33791,36864,135156,nki-op,nki-op,128,50.43,2,0,9451.3,5.184,512,10069.5,128,128
+neos-4300652-rahue.mps.gz,76992,33003,183616,nki-op,nki-op,32,74.15,2,0,9900.9,15.483,1600,9669.7,32,32
+neos-4300652-rahue.mps.gz,76992,33003,183616,nki-op,nki-op,128,69.78,2,0,14104.0,20.92,1600,13060.2,128,128
+neos-933966.mps.gz,12047,31762,180618,nki-op,nki-op,32,44.52,2,0,7308.3,4.215,576,7311.2,32,32
+neos-933966.mps.gz,12047,31762,180618,nki-op,nki-op,128,44.13,2,0,8645.7,5.063,576,8746.1,128,128

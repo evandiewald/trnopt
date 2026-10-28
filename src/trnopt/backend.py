@@ -145,10 +145,15 @@ class MatVec:
 
     This is also where a custom Trainium (NKI) kernel will plug in later: the solver only ever
     calls `matvec.K(x)` and `matvec.KT(y)`.
+
+    permute=True lets the NKI kernel skip most of its scatters (nki_sell.output_order): x and y then live
+    in the kernel's order, x[i] being variable col_perm[i] and y[i] row row_perm[i], and the caller permutes
+    its data in and its results out. Both are None (no permutation) for every other method.
     """
 
-    def __init__(self, K: sp.spmatrix, backend: Backend):
+    def __init__(self, K: sp.spmatrix, backend: Backend, permute: bool = False):
         K = sp.csr_matrix(K, dtype=np.float64)
+        self.row_perm = self.col_perm = None
         m, n = K.shape
         spmv = backend.spmv
         if spmv == "auto":
@@ -159,7 +164,7 @@ class MatVec:
         self.dense = backend.dense and spmv == "torch"
         self.be = backend
         if spmv in ("nki", "nki-op", "nki-sim"):
-            self._init_nki(K)
+            self._init_nki(K, permute)
             return
         if spmv in ("metal", "metal-ref"):
             from .metal_sell import MetalSELL
@@ -198,19 +203,27 @@ class MatVec:
         return self._KT @ y
 
     # ---- the custom Trainium kernel (sliced ELL, see sell.py / nki_sell.py) -------------------
-    def _init_nki(self, K: sp.csr_matrix) -> None:
-        from .nki_sell import kernel_tables
+    def _init_nki(self, K: sp.csr_matrix, permute: bool) -> None:
+        from .nki_sell import kernel_tables, output_order
         from .sell import build_sell
         self._sK, self._sKT = build_sell(K), build_sell(K.T.tocsr())
+        self._ordered = permute
         dev = "cpu" if self.spmv == "nki-sim" else self.be.device
-        tabs = lambda S: tuple(torch.as_tensor(t, device=dev) for t in kernel_tables(S))
-        self._K_tabs, self._KT_tabs = tabs(self._sK), tabs(self._sKT)
+        tabs = lambda *a, **kw: tuple(torch.as_tensor(t, device=dev) for t in kernel_tables(*a, **kw))
+        if permute:
+            # K's output order is y's order and K^T's is x's; each kernel gathers in the other's order.
+            ypos, xpos = output_order(self._sK)[0], output_order(self._sKT)[0]
+            self.row_perm, self.col_perm = np.argsort(ypos), np.argsort(xpos)
+            self._K_tabs = tabs(self._sK, col_pos=xpos, ordered=True)
+            self._KT_tabs = tabs(self._sKT, col_pos=ypos, ordered=True)
+        else:
+            self._K_tabs, self._KT_tabs = tabs(self._sK), tabs(self._sKT)
         self._kernels = {}                       # (which, B) -> kernel; one compile per batch size
         if self.spmv == "nki-op":
             try:
                 from . import nki_op
                 nki_op.register()
-                self._layout = {"K": nki_op.layout_id(self._sK), "KT": nki_op.layout_id(self._sKT)}
+                self._layout = {"K": nki_op.layout_id(self._sK, permute), "KT": nki_op.layout_id(self._sKT, permute)}
                 self._op_checked = set()         # (which, B) the op has already run eagerly without error
             except Exception as e:               # no torch_neuronx, or an API it doesn't have
                 warnings.warn(f"spmv='nki-op' unavailable ({type(e).__name__}: {e}); using 'nki'")
@@ -252,7 +265,7 @@ class MatVec:
         B = X.shape[1]
         kernel = self._kernels.get((which, B))
         if kernel is None:
-            kernel = self._kernels[(which, B)] = make_sell_kernel(S, B)
+            kernel = self._kernels[(which, B)] = make_sell_kernel(S, B, self._ordered)
         if self.spmv == "nki-sim":
             import nki
             args = [t.numpy() for t in tabs] + [X.detach().cpu().contiguous().numpy()]
