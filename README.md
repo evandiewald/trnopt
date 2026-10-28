@@ -107,6 +107,17 @@ Why each restriction exists, and how we deal with it:
 - **Every new problem size means a recompile.** TorchNeuron doesn't support shapes that change, so
   each distinct problem size compiles once. On CPU that takes 1-20 s. It's fine for batches of
   same-size LPs (Phase 3), but expensive for one-off solves.
+- **Compiles are cached on disk, so a new process doesn't redo them.** Importing trnopt points
+  Inductor's cache and the Neuron compiler's cache (NEFFs, including NKI kernels) at one directory,
+  `TRNOPT_CACHE_DIR` (default `~/.cache/trnopt`). Both are keyed on the program, not on the LP, so
+  re-solving an instance or solving another one of the same size skips the compiler. Unlike PyTorch's
+  `/tmp` default, the cache survives reboots, and you can copy or share it (EFS) across instances.
+  It never overrides `TORCHINDUCTOR_CACHE_DIR` / `NEURON_COMPILE_CACHE_URL` if you set them;
+  `TRNOPT_CACHE_DIR=off` disables it, and `trnopt.compile_cache.clear()` empties it. Import
+  trnopt before torch, since the Neuron plugin may read its setting when torch loads. Emulated
+  Trainium on israel: first solve in a fresh process 4.6 s with a cold cache, 1.3 s warm (what's left
+  is tracing the step function, which runs every process). Within a process, NKI kernels are also
+  shared across solves of the same matrix layout.
 
 ### What Phase 1 measured (CPU, 640 fixed iterations)
 
@@ -531,6 +542,7 @@ PJRT_DEVICE=CPU .venv-xla/bin/python -m pytest -q          # 59 tests, including
 ```
 src/trnopt/
   backend.py     Backend presets + MatVec ("multiply by K", sparse or dense; NKI plugs in here)
+  compile_cache.py  one persistent directory for compiled programs (Inductor + Neuron caches)
   bench.py       benchmark harness: CSV per solve, compile time separate, $/solve, summary
   batch.py       batched + continuous-batching solver: LPs sharing K through fixed slots, per-slot restarts / verdicts
   sell.py        sliced-ELL sparse layout + NumPy reference multiply

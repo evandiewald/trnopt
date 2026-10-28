@@ -223,6 +223,37 @@ def test_bench_writes_csv(tmp_path):
     assert shifted_geomean([10.0]) == pytest.approx(10.0)
 
 
+# ---- compile cache ---------------------------------------------------------------------------------
+
+def _cache_env_after_import(**env):
+    import os, subprocess, sys
+    base = {k: v for k, v in os.environ.items()
+            if k not in ("TRNOPT_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR", "NEURON_COMPILE_CACHE_URL", "NEURON_CC_FLAGS")}
+    code = "import os, trnopt; print(os.environ.get('TORCHINDUCTOR_CACHE_DIR')); print(os.environ.get('NEURON_COMPILE_CACHE_URL'))"
+    out = subprocess.run([sys.executable, "-c", code], env={**base, **env}, capture_output=True, text=True, check=True)
+    return out.stdout.split()
+
+
+def test_compile_cache_env(tmp_path):
+    assert _cache_env_after_import(TRNOPT_CACHE_DIR=str(tmp_path)) == [str(tmp_path / "inductor"), str(tmp_path / "neuron")]
+    # never overrides what the user set; "off" leaves the compilers' own defaults
+    assert _cache_env_after_import(TRNOPT_CACHE_DIR=str(tmp_path), NEURON_COMPILE_CACHE_URL="s3://b/c")[1] == "s3://b/c"
+    assert _cache_env_after_import(TRNOPT_CACHE_DIR=str(tmp_path), NEURON_CC_FLAGS="--cache_dir=/x")[1] == "None"
+    inductor, neuron = _cache_env_after_import(TRNOPT_CACHE_DIR="off")   # torch fills in its own inductor default
+    assert "trnopt" not in inductor and neuron == "None"
+
+
+def test_compile_cache_persists_across_processes(tmp_path):
+    """A compiled solve in a fresh process leaves its compiled step in TRNOPT_CACHE_DIR."""
+    import os, subprocess, sys
+    code = ("from trnopt import Backend, PDLPOptions, solve_pdlp; from trnopt.problems import textbook; "
+            "solve_pdlp(textbook(), PDLPOptions(backend=Backend.preset('emulate-neuron'), max_iters=64))")
+    env = {**os.environ, "TRNOPT_CACHE_DIR": str(tmp_path)}
+    env.pop("TORCHINDUCTOR_CACHE_DIR", None)
+    subprocess.run([sys.executable, "-c", code], env=env, check=True)
+    assert any((tmp_path / "inductor").rglob("*.py"))
+
+
 # ---- sliced-ELL format and the NKI kernel ---------------------------------------------------------
 
 @pytest.mark.parametrize("split", [None, 7, "auto"])
@@ -254,6 +285,20 @@ def test_nki_kernel_in_simulator():
     Y = sell_matmul_simulated(build_sell(K), X)
     ref = K @ X
     assert np.abs(Y - ref).max() / np.abs(ref).max() < 1e-5
+
+
+def test_nki_kernels_cached_per_layout():
+    """Same layout and B: the compiled kernel is reused. Anything baked into it differs: a new kernel."""
+    pytest.importorskip("nki")
+    import scipy.sparse as sp
+    from trnopt.nki_sell import make_sell_kernel
+    from trnopt.sell import build_sell
+    K = sp.random(300, 500, density=0.02, random_state=1, format="csr")
+    S = build_sell(K)
+    assert make_sell_kernel(S, 4) is make_sell_kernel(build_sell(K.copy()), 4)
+    assert make_sell_kernel(S, 4) is not make_sell_kernel(S, 8)
+    K2 = sp.random(300, 500, density=0.02, random_state=2, format="csr")
+    assert make_sell_kernel(build_sell(K2), 4) is not make_sell_kernel(S, 4)
 
 
 def test_solver_with_simulated_nki_kernel():

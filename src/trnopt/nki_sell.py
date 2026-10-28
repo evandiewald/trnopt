@@ -37,6 +37,8 @@ Requires the standalone `nki` package (Neuron SDK 2.29+; preinstalled in the Neu
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 
 from .sell import LANES, SELL
@@ -50,6 +52,8 @@ except ImportError:  # the rest of trnopt works without it
     HAVE_NKI = False
 
 SBUF_BUDGET = 48 * 1024        # bytes per partition for one chunk of gathered rows
+
+_KERNELS: dict = {}            # make_sell_kernel's cache: (layout, B) -> kernel, for the life of the process
 
 
 def scatter_passes(S: SELL) -> tuple[np.ndarray, tuple[int, ...]]:
@@ -92,6 +96,10 @@ def make_sell_kernel(S: SELL, B: int):
     Slice widths differ, so they're baked in as compile-time constants. That's the normal
     Trainium trade: one compile per (matrix, B), then every multiply reuses it (PDLP does
     hundreds of thousands of multiplies with the same K).
+
+    Kernels are cached per process on everything baked in (shape, slice widths, scatter passes, B),
+    so solving the same K again reuses the compiled kernel. The matrix's values and column
+    indices are kernel inputs, so they aren't part of the key.
     """
     if not HAVE_NKI:
         raise ImportError("the nki package is not installed; see the README for how to get it")
@@ -99,11 +107,13 @@ def make_sell_kernel(S: SELL, B: int):
     widths, offsets, num_slices = S.widths, S.offsets, S.num_slices
     has_splits = len(np.unique(S.out_rows[S.out_rows >= 0])) < int((S.out_rows >= 0).sum())
     passes = scatter_passes(S)[1]
+    key = (m, n, widths, has_splits, passes, B)            # offsets follow from widths
+    if key in _KERNELS:
+        return _KERNELS[key]
     first_pass = tuple(int(x) for x in np.concatenate([[0], np.cumsum(passes)[:-1]]))
     total_passes = int(sum(passes))
     kc_max = max(1, SBUF_BUDGET // (B * 4))                  # gathered rows per chunk that fit SBUF
 
-    @nki.jit
     def sell_matmul(cols, vals, out_rows, X):
         # cols (int32), vals (float32): (128, total_width). out_rows (int32): (128, total_passes). X: (n, B).
         Y = nl.ndarray((m, B), dtype=nl.float32, buffer=nl.shared_hbm)
@@ -155,7 +165,13 @@ def make_sell_kernel(S: SELL, B: int):
                     nisa.dma_copy(dst=dst, src=acc, oob_mode=nisa.oob_mode.skip, dge_mode=nisa.dge_mode.swdge)
         return Y
 
-    return sell_matmul
+    # NKI's cross-process trace cache (NKI_ENABLE_TRACE_CACHE) may not see constants captured from this
+    # closure, so two layouts with equal table shapes could collide. A per-layout name keeps them apart
+    # if the cache keys on it.
+    tag = hashlib.sha1(repr(key).encode()).hexdigest()[:16]
+    sell_matmul.__name__ = sell_matmul.__qualname__ = f"sell_matmul_{tag}"
+    _KERNELS[key] = kernel = nki.jit(sell_matmul)
+    return kernel
 
 
 def sell_matmul_simulated(S: SELL, X: np.ndarray) -> np.ndarray:
