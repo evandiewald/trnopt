@@ -43,11 +43,17 @@ class Backend:
     compile_backend: str | None = None       # None = PyTorch's default compiler for the device
     lazy: bool = False                       # PyTorch/XLA-style lazy execution: sync() after each iteration
     spmv: str = "torch"                      # how to multiply by K: "torch" (dense or sparse per `dense`),
+                                             # "auto" (Trainium: dense if K is small enough, else "nki"),
                                              # "nki" (custom Trainium kernel, sliced-ELL layout),
                                              # "nki-sim" (the same kernel in NKI's CPU simulator, for testing),
                                              # "metal" (custom Apple GPU kernel, sliced-ELL layout) or
                                              # "metal-ref" (the Metal kernel's arithmetic in plain PyTorch, for testing)
     max_dense_entries: int = 100_000_000     # refuse to build a dense K bigger than this (~400 MB in float32)
+    # spmv="auto": dense up to this many entries (~80 MB in float32), the NKI kernel above it. Measured on trn1
+    # (2026-10-27): dense won outright on small K (setcover 1000x1000: 2.4 s vs 4.5 s for strong branching),
+    # tied at 2.8M entries (berkel) and lost slightly at 13.6M (nu25, B=1024); NKI is the only option
+    # for the large MIPLIB instances.
+    auto_dense_entries: int = 20_000_000
 
     @classmethod
     def preset(cls, name: str, **overrides) -> "Backend":
@@ -58,8 +64,10 @@ class Backend:
             "cpu-float32": cls(dtype=torch.float32),
             "cuda": cls(device="cuda"),
             # Trainium (trn1, trn2, trn3) with TorchNeuron, PyTorch's native Neuron device
-            # (torch-neuronx 2.10+): operations run as they're called. Verified on trn1.
-            "neuron": cls(device="neuron", dtype=torch.float32, dense=True, compile=True, compile_backend="neuron"),
+            # (torch-neuronx 2.10+): operations run as they're called. Verified on trn1. Dense K when it's
+            # small enough, the NKI sparse kernel otherwise (spmv="auto").
+            "neuron": cls(device="neuron", dtype=torch.float32, dense=True, compile=True, compile_backend="neuron",
+                          spmv="auto"),
             # Legacy: the older PyTorch/XLA stack (torch-neuronx <= 2.9). Current Neuron DLAMIs don't ship it.
             # Also runs on a plain CPU with torch_xla installed and PJRT_DEVICE=CPU, for testing.
             "neuron-xla": cls(device="xla", dtype=torch.float32, dense=True, lazy=True),
@@ -90,10 +98,30 @@ class Backend:
         # dynamic=False: always specialize to concrete shapes (see "compile" above). Elsewhere,
         # None keeps PyTorch's default of switching to symbolic shapes after a recompile.
         dynamic = False if self.device.startswith("neuron") else None
+        if dynamic is False:
+            # Fixed shapes mean one compiled version per shape (problem size, batch-size bucket).
+            # Dynamo's default of 8 versions per function would silently fall back to uncompiled
+            # code in a long run (a benchmark over many problems, a MIP with several buckets).
+            import torch._dynamo as dynamo
+            dynamo.config.recompile_limit = max(dynamo.config.recompile_limit, 256)
         key = (f, self.compile_backend or "inductor", dynamic)
         if key not in _COMPILED:
             _COMPILED[key] = torch.compile(f, backend=key[1], dynamic=dynamic)
         return _COMPILED[key]
+
+    def batch_slots(self, n: int, cap: int) -> int:
+        """How many slots to give a batch of n LPs (at most cap).
+
+        On Neuron every batch size is a separate compile (seconds), so round up to a power of two
+        (at least 16): a branch-and-bound then compiles a handful of sizes instead of one per
+        distinct candidate count. Unused slots stay frozen. Elsewhere, exactly min(n, cap).
+        """
+        if not self.device.startswith("neuron"):
+            return max(1, min(n, cap))
+        b = 16
+        while b < n:
+            b *= 2
+        return max(1, min(b, cap))
 
     def sync(self) -> None:
         """Lazy (XLA) backends: compile-and-run everything recorded so far. A no-op otherwise."""
@@ -119,14 +147,20 @@ class MatVec:
     def __init__(self, K: sp.spmatrix, backend: Backend):
         K = sp.csr_matrix(K, dtype=np.float64)
         m, n = K.shape
-        self.dense = backend.dense
+        spmv = backend.spmv
+        if spmv == "auto":
+            spmv = "torch" if m * n <= backend.auto_dense_entries else "nki"
+            if spmv == "torch":
+                backend = replace(backend, dense=True)
+        self.spmv = spmv                         # the method actually used for this matrix
+        self.dense = backend.dense and spmv == "torch"
         self.be = backend
-        if backend.spmv in ("nki", "nki-sim"):
+        if spmv in ("nki", "nki-sim"):
             self._init_nki(K)
             return
-        if backend.spmv in ("metal", "metal-ref"):
+        if spmv in ("metal", "metal-ref"):
             from .metal_sell import MetalSELL
-            ref = backend.spmv == "metal-ref"
+            ref = spmv == "metal-ref"
             self._mK = MetalSELL(K, device=backend.device, reference=ref)
             self._mKT = MetalSELL(K.T.tocsr(), device=backend.device, reference=ref)
             return
@@ -143,16 +177,16 @@ class MatVec:
             self._KT = _to_torch_csr(K.T.tocsr(), backend)
 
     def K(self, x: torch.Tensor) -> torch.Tensor:
-        if self.be.spmv in ("metal", "metal-ref"):
+        if self.spmv in ("metal", "metal-ref"):
             return self._mK.matmul(x).to(x.dtype)
-        if self.be.spmv != "torch":
+        if self.spmv != "torch":
             return self._nki_apply("K", x)
         return self._K @ x
 
     def KT(self, y: torch.Tensor) -> torch.Tensor:
-        if self.be.spmv in ("metal", "metal-ref"):
+        if self.spmv in ("metal", "metal-ref"):
             return self._mKT.matmul(y).to(y.dtype)
-        if self.be.spmv != "torch":
+        if self.spmv != "torch":
             return self._nki_apply("KT", y)
         return self._KT @ y
 
@@ -161,7 +195,7 @@ class MatVec:
         from .nki_sell import kernel_tables
         from .sell import build_sell
         self._sK, self._sKT = build_sell(K), build_sell(K.T.tocsr())
-        dev = self.be.device if self.be.spmv == "nki" else "cpu"
+        dev = self.be.device if self.spmv == "nki" else "cpu"
         tabs = lambda S: tuple(torch.as_tensor(t, device=dev) for t in kernel_tables(S))
         self._K_tabs, self._KT_tabs = tabs(self._sK), tabs(self._sKT)
         self._kernels = {}                       # (which, B) -> kernel; one compile per batch size
@@ -180,7 +214,7 @@ class MatVec:
         kernel = self._kernels.get((which, B))
         if kernel is None:
             kernel = self._kernels[(which, B)] = make_sell_kernel(S, B)
-        if self.be.spmv == "nki-sim":
+        if self.spmv == "nki-sim":
             import nki
             args = [t.numpy() for t in tabs] + [X.detach().cpu().contiguous().numpy()]
             Y = torch.as_tensor(np.asarray(nki.simulate(kernel)(*args)))

@@ -1,0 +1,22 @@
+host: trn1.2xlarge_auto   CPU workers for HiGHS: 8   Mac GPU: False   torch 2.14.0+cu130
+setcover_1000x1000_s0: 1000 x 1000, 9949 nonzeros; root LP 0.07s (HiGHS simplex); 312 candidates -> 624 LPs
+   HiGHS warm dual simplex:    20.80 s on 8 cores (14.0 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1  B=624:     2.44 s  (624/624 finished, worst obj err 4e-05, median 7e-06; infeasible agree 624/624; our pick's exact score = 1.000 of best)   vs HiGHS warm: 8.52x
+cauction_360x1400_s0: 360 x 1400, 7884 nonzeros; root LP 0.16s (HiGHS simplex); 353 candidates -> 706 LPs
+   HiGHS warm dual simplex:    23.13 s on 8 cores (51.4 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1  B=706:     5.02 s  (706/706 finished, worst obj err 3e-05, median 4e-06; infeasible agree 706/706; our pick's exact score = 1.000 of best)   vs HiGHS warm: 4.61x
+indset_1000_a10_s0: 7430 x 1000, 16067 nonzeros; root LP 0.21s (HiGHS simplex); 845 candidates -> 1690 LPs
+   HiGHS warm dual simplex:    33.48 s on 8 cores (62.6 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1  B=1024:     7.99 s  (1690/1690 finished, worst obj err 5e-05, median 2e-06; infeasible agree 1690/1690; our pick's exact score = 1.000 of best)   vs HiGHS warm: 4.19x
+KeyError: 'chromaticindex512-7'
+host: trn1.2xlarge_2core   CPU workers for HiGHS: 8   Mac GPU: False   torch 2.14.0+cu130
+setcover_1000x1000_s0: 1000 x 1000, 9949 nonzeros; root LP 0.07s (HiGHS simplex); 312 candidates -> 624 LPs
+   HiGHS warm dual simplex:    22.87 s on 8 cores (14.2 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1 x2 B=624:     3.83 s  (624/624 finished, worst obj err 4e-05, median 7e-06; infeasible agree 624/624; our pick's exact score = 1.000 of best)   vs HiGHS warm: 5.98x
+cauction_360x1400_s0: 360 x 1400, 7884 nonzeros; root LP 0.16s (HiGHS simplex); 353 candidates -> 706 LPs
+   HiGHS warm dual simplex:    23.29 s on 8 cores (52.0 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1 x2 B=706:     3.94 s  (706/706 finished, worst obj err 3e-05, median 4e-06; infeasible agree 706/706; our pick's exact score = 1.000 of best)   vs HiGHS warm: 5.92x
+indset_1000_a10_s0: 7430 x 1000, 16067 nonzeros; root LP 0.21s (HiGHS simplex); 845 candidates -> 1690 LPs
+   HiGHS warm dual simplex:    32.96 s on 8 cores (65.6 ms/LP on one core); 0 infeasible children; 1 candidate(s) tied for the best exact score
+   trnopt trn1 x2 B=1024:     7.89 s  (1690/1690 finished, worst obj err 5e-05, median 2e-06; infeasible agree 1690/1690; our pick's exact score = 1.000 of best)   vs HiGHS warm: 4.18x
+KeyError: 'chromaticindex512-7'

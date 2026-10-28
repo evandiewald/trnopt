@@ -10,6 +10,9 @@ dependencies = [
     "highspy>=1.7",
 ]
 
+[project.optional-dependencies]
+pyomo = ["pyomo>=6.9"]        # SolverFactory("trnopt") via `import trnopt.pyomo_plugin`
+
 [project.scripts]
 trnopt-bench = "trnopt.bench:main"
 

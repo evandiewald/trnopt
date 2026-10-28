@@ -1,0 +1,4 @@
+finished,infeasible_agree,instance,lps,m,median_obj_err,method,n,nnz,pick_quality,sec_per_lp,seconds,ties,worst_obj_err
+,,chromaticindex512-7.mps.gz,2000,33791,,HiGHS warm (all cores),36864,135156,1.0,0.3726207258825,745.241451765,1000,
+,,chromaticindex512-7.mps.gz,2000,33791,,"HiGHS cold pdlp (1 core, est.)",36864,135156,,0.4626385225001286,925.2770450002572,,
+2000,2000,chromaticindex512-7.mps.gz,2000,33791,4.088878631586246e-05,trnopt trn1 x2 B=1024,36864,135156,1.0,0.02186763572692871,43.73527145385742,1000,7.510185241710322e-05

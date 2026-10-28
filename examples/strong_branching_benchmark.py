@@ -18,7 +18,11 @@ Methods, all solving the same LPs:
                      baseline (the paper makes the same point about earlier GPU work).
   * trnopt CPU     : batched PDLP, float32, 128 LPs at a time, warm-started from the root solution.
   * trnopt GPU     : the same on the Mac GPU with the Metal kernel (if available).
-  * trnopt trn1    : the same on one Trainium NeuronCore, sparse K through the NKI kernel (--methods neuron-nki).
+  * trnopt CUDA    : the same on an NVIDIA GPU (--methods cuda-float32; e.g. the T4 in a g4dn).
+  * cuOpt PDLP     : NVIDIA cuOpt's PDLP solving each LP in turn (it has no public batched-LP call),
+                     warm-started from cuOpt's own root solve where its API allows (--methods cuopt-pdlp).
+  * trnopt trn1    : the same on one Trainium NeuronCore (--methods neuron: dense K if it fits, else the
+                     NKI kernel; neuron-dense / neuron-nki force one), or on both (--methods neuron-2core).
 
 Reported: wall seconds for ALL the LPs, objective error vs HiGHS, and how good the variable chosen
 from our scores is when judged by exact scores (1.0 = as good as the best; symmetric instances
@@ -55,7 +59,14 @@ METHODS = {
     "cpu-float32": ("trnopt CPU", lambda: Backend.preset("cpu-float32")),
     "mps-metal": ("trnopt GPU", lambda: Backend.preset("mps-metal")),
     "neuron-nki": ("trnopt trn1 NKI", lambda: Backend.preset("neuron", spmv="nki", dense=False)),
-    "neuron": ("trnopt trn1 dense", lambda: Backend.preset("neuron")),
+    "neuron": ("trnopt trn1", lambda: Backend.preset("neuron")),                 # dense if K fits, else NKI
+    "neuron-dense": ("trnopt trn1 dense", lambda: Backend.preset("neuron", spmv="torch")),
+    "neuron-2core": ("trnopt trn1 x2", None),                                    # both NeuronCores, see trn_two_cores.py
+    "cuda-float32": ("trnopt CUDA", lambda: Backend.preset("cuda", dtype=torch.float32)),
+    "cuda-float32-compiled": ("trnopt CUDA compiled", lambda: Backend.preset("cuda", dtype=torch.float32, compile=True)),
+    "cuopt-pdlp": ("cuOpt PDLP per LP", None),                                   # see cuopt_adapter.py
+    "cuopt-pdlp-f32": ("cuOpt PDLP f32 per LP", None),                           # pdlp_precision = single
+    "cuopt-pdlp-warm": ("cuOpt PDLP warm per LP", None),                         # Stable2 mode + warm start
 }
 
 # ---- HiGHS, warm-started, in worker processes ------------------------------------------------
@@ -193,6 +204,10 @@ def main():
     ap.add_argument("--methods", nargs="+", default=None, choices=list(METHODS),
                     help="trnopt variants to run (default: cpu-float32, plus mps-metal on a Mac)")
     ap.add_argument("--host", default=None, help="label for the machine in the CSV name, e.g. trn1.2xlarge")
+    ap.add_argument("--highs-cache", action="store_true",
+                    help="reuse HiGHS warm results from an earlier run on this host (results/cache/), or save them")
+    ap.add_argument("--cuopt-budget", type=float, default=600.0,
+                    help="seconds per instance for cuopt-pdlp; past it, the total is extrapolated from the LPs done")
     args = ap.parse_args()
     workers = os.cpu_count() or 1
     gpu = torch.backends.mps.is_available()
@@ -202,6 +217,11 @@ def main():
     print(f"host: {host}   CPU workers for HiGHS: {workers}   Mac GPU: {gpu}   torch {torch.__version__}")
     rows = []
     methods = [(METHODS[m][0], m) for m in (args.methods or (["cpu-float32"] + (["mps-metal"] if gpu else [])))]
+    picked = [m for _, m in methods]
+    if "neuron-2core" in picked and any(m.startswith("neuron") and m != "neuron-2core" for m in picked):
+        # A process that has used the chip holds its NeuronCores until it exits, so the two worker
+        # processes couldn't get theirs. Run neuron-2core in its own invocation (--highs-cache helps).
+        ap.error("run --methods neuron-2core in a separate invocation from the other neuron methods")
 
     for name in args.instances or default_instances(args.quick, args.all):
         lp = load_instance(name)
@@ -216,12 +236,25 @@ def main():
               f"{len(idx)} candidates -> {N} LPs", flush=True)
 
         # HiGHS warm, all LPs, all cores.
-        t = time.perf_counter()
-        # spawn, not fork: a forked worker would inherit this process's accelerator runtime and HiGHS state.
-        with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"),
-                                 initializer=_worker_init, initargs=(lp, bcols, brows)) as ex:
-            out = list(ex.map(_warm_solve, tasks, chunksize=max(1, N // (4 * workers))))
-        warm_wall = time.perf_counter() - t
+        # keyed on the machine's real hostname, not the --host label, so differently labelled runs share it
+        cache = ROOT / "results" / "cache" / f"highs_warm_{platform.node()}_{workers}w_{lp.name}_{len(idx)}.pkl"
+        if args.highs_cache and cache.exists():
+            import pickle
+            with open(cache, "rb") as f:
+                out, warm_wall = pickle.load(f)
+            print(f"   (HiGHS warm results reused from {cache.name})")
+        else:
+            t = time.perf_counter()
+            # spawn, not fork: a forked worker would inherit this process's accelerator runtime and HiGHS state.
+            with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"),
+                                     initializer=_worker_init, initargs=(lp, bcols, brows)) as ex:
+                out = list(ex.map(_warm_solve, tasks, chunksize=max(1, N // (4 * workers))))
+            warm_wall = time.perf_counter() - t
+            if args.highs_cache:
+                import pickle
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache, "wb") as f:
+                    pickle.dump((out, warm_wall), f)
         ref_obj = np.array([o for _, _, o in out])
         ref_inf = np.array(["nfeasible" in s for _, s, _ in out])
         ref_best, ref_score = best_variable(idx, root_obj, ref_obj, ref_inf)
@@ -247,13 +280,63 @@ def main():
         # trnopt, warm-started from its own root solution.
         root = solve_pdlp(lp, PDLPOptions(tol=TOL, backend=Backend.preset("cpu-float32"), time_limit=300))
         for label, preset in methods:
-            opts = PDLPOptions(tol=TOL, backend=METHODS[preset][1](), time_limit=3600)
-            B = min(args.chip_slots if (args.chip_slots and preset.startswith("neuron")) else args.slots, N)
-            solve_pdlp_stream(lp, B, B, lower=L, upper=U, x0=root.x, y0=root.y,
-                              opts=PDLPOptions(tol=TOL, backend=opts.backend, max_iters=64))   # warm-up
-            t = time.perf_counter()
-            r = solve_pdlp_stream(lp, N, B, lower=L, upper=U, x0=root.x, y0=root.y, opts=opts)
-            wall = time.perf_counter() - t
+            B = min(args.chip_slots if (args.chip_slots and preset.startswith(("neuron", "cuda"))) else args.slots, N)
+            if preset.startswith("cuopt"):
+                from cuopt_adapter import solve_lp as _solve_lp, to_data_model
+                prec = 0 if preset.endswith("f32") else None
+                use_warm = preset.endswith("warm")
+                solve_lp = lambda dm, **kw: _solve_lp(dm, precision=prec, **kw)
+                dm = to_data_model(lp)
+                rr = solve_lp(dm, tol=TOL, want_warm=use_warm)             # cuOpt's own root (also a warm-up)
+                warm = rr.warm if use_warm else None
+                order = np.random.default_rng(0).permutation(N)            # random order, so a partial run is a fair sample
+                done, status, objective = [], [], []
+                t = time.perf_counter()
+                for i in order:
+                    dm.set_variable_lower_bounds(np.asarray(L([i])[0], dtype=np.float64))
+                    dm.set_variable_upper_bounds(np.asarray(U([i])[0], dtype=np.float64))
+                    try:
+                        ri = solve_lp(dm, tol=TOL, warm=warm)
+                    except Exception as e:                                   # warm start not accepted: go cold
+                        if warm is None:
+                            raise
+                        print(f"   cuOpt warm start failed ({type(e).__name__}: {str(e)[:120]}); solving cold")
+                        warm = None
+                        ri = solve_lp(dm, tol=TOL)
+                    done.append(int(i)); status.append(ri.status); objective.append(ri.objective)
+                    if time.perf_counter() - t > args.cuopt_budget:
+                        break
+                k = len(done)
+                wall = (time.perf_counter() - t) * N / k
+                done = np.array(done)
+                st = np.array(status); ob = np.array(objective)
+                ok = np.isin(st, ["optimal", "infeasible"])
+                feas = ~ref_inf[done] & (st == "optimal")
+                err = np.abs(ob[feas] - ref_obj[done][feas]) / (1 + np.abs(ref_obj[done][feas]))
+                tag = f"{'warm' if use_warm else 'cold'}" + ("" if k == N else f", est. from {k}/{N} LPs")
+                print(f"   {label} ({tag}): {wall:8.2f} s  ({ok.sum()}/{k} finished, "
+                      f"worst obj err {err.max() if err.size else float('nan'):.0e}, "
+                      f"infeasible agree {np.sum((st == 'infeasible') == ref_inf[done])}/{k})   vs HiGHS warm: {warm_wall / wall:.2f}x",
+                      flush=True)
+                rows.append(dict(instance=lp.name, m=lp.m, n=lp.n, nnz=lp.K.nnz, lps=N, method=f"{label} ({tag})",
+                                 seconds=wall, sec_per_lp=wall / N, finished=int(ok.sum()), sampled=k,
+                                 worst_obj_err=float(err.max()) if err.size else None,
+                                 median_obj_err=float(np.median(err)) if err.size else None,
+                                 infeasible_agree=int(np.sum((st == "infeasible") == ref_inf[done]))))
+                continue
+            if preset == "neuron-2core":
+                from trn_two_cores import split_solve
+                ids = np.arange(N)
+                wall, status, objective, _ = split_solve(lp, L(ids).astype(np.float32), U(ids).astype(np.float32),
+                                                         x0=root.x, y0=root.y, cores=2, slots=min(B, -(-N // 2)), tol=TOL)
+                r = argparse.Namespace(status=status, objective=objective)
+            else:
+                opts = PDLPOptions(tol=TOL, backend=METHODS[preset][1](), time_limit=3600)
+                solve_pdlp_stream(lp, B, B, lower=L, upper=U, x0=root.x, y0=root.y,
+                                  opts=PDLPOptions(tol=TOL, backend=opts.backend, max_iters=64))   # warm-up
+                t = time.perf_counter()
+                r = solve_pdlp_stream(lp, N, B, lower=L, upper=U, x0=root.x, y0=root.y, opts=opts)
+                wall = time.perf_counter() - t
             ok = np.array([s in ("optimal", "infeasible") for s in r.status])
             ours_inf = np.array([s == "infeasible" for s in r.status])
             feas = ~ref_inf & (np.array(r.status) == "optimal")

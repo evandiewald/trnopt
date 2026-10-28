@@ -62,6 +62,39 @@ class MIPResult:
     incumbents: list = field(default_factory=list)   # (seconds, objective) each time it improved
 
 
+def _solve_presolved(lp: LP, kw: dict) -> MIPResult:
+    """solve_mip with HiGHS presolve in front: presolve, solve the reduced problem, postsolve."""
+    from .highs_presolve import HighsPresolve
+    t0 = time.perf_counter()
+    P = HighsPresolve(lp, time_limit=kw["time_limit"])
+    tp = time.perf_counter() - t0
+    if kw["verbose"]:
+        print(f"  presolve ({tp:.2f}s): {P.summary()}")
+    if P.status == "infeasible":
+        return MIPResult("infeasible", np.inf, np.inf, np.inf, None, 0, tp, {"presolve": tp}, {})
+    if P.status == "empty":                                   # presolve fixed everything
+        x = P.postsolve(np.zeros(0))
+        obj = float(lp.c @ x)
+        return MIPResult("optimal", obj, obj, 0.0, x, 0, tp, {"presolve": tp}, {})
+    red = P.reduced
+    rest = dict(kw, time_limit=max(1.0, kw["time_limit"] - tp))
+    if red.integer is None:                                   # presolve removed every integer variable: an LP
+        from .reference import solve_highs
+        ref = solve_highs(red, time_limit=rest["time_limit"])
+        ok = ref.status == "Optimal"
+        x = P.postsolve(ref.x) if ok else None
+        obj = ref.objective + P.offset if ok else np.inf
+        status = "optimal" if ok else ("infeasible" if "nfeasible" in ref.status else "time_limit")
+        return MIPResult(status, obj, obj if ok else -np.inf, 0.0 if ok else np.inf, x, 0,
+                         time.perf_counter() - t0, {"presolve": tp}, {})
+    r = solve_mip(red, presolve=False, **rest)
+    x = P.postsolve(r.x) if r.x is not None else None
+    obj, bound = r.objective + P.offset, r.bound + P.offset
+    gap = (obj - bound) / max(1.0, abs(obj)) if np.isfinite(obj) and np.isfinite(bound) else r.gap
+    return MIPResult(r.status, obj, bound, gap, x, r.nodes, r.seconds + tp, {**r.times, "presolve": tp},
+                     dict(r.counts, presolve=P.summary()), [(t + tp, o + P.offset) for t, o in r.incumbents])
+
+
 @dataclass(order=True)
 class _Node:
     bound: float
@@ -161,8 +194,9 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
               node_limit: int = 1_000_000, max_candidates: int | None = None, strong_depth: int | None = None,
               backend: str | Backend = "cpu-float32", slots: int = 128, strong_tol: float = 1e-4,
               highs_workers: int = 1, verify_top: int = 0, reliability: int = 4, strong_iters: int = 256,
-              learn_from_estimates: bool = True,
-              verbose: bool = False) -> MIPResult:
+              learn_from_estimates: bool = True, presolve: bool = False,
+              pump: int = 0, pump_rounds: int = 40, pump_time: float | None = None, pump_patience: int = 3,
+              cuts: int = 0, cut_max: int = 100, verbose: bool = False) -> MIPResult:
     """Branch-and-bound on lp (lp.integer marks the integer variables). See the module docstring.
 
     max_candidates: strong-branch on at most this many fractional variables (most fractional first);
@@ -173,6 +207,14 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     Strong branching only needs a RANKING, so like dual simplex with a pivot limit (the
                     usual practice) we stop early and score from the estimate. 256 picked the same variable
                     as exact scores on every test family; full convergence cost ~10x more for no gain.
+    pump:           number of parallel feasibility pumps to run at the root (see pump.py), batched on `backend`;
+                    0 = off. pump_rounds / pump_time bound the effort (pump_time default: min(60 s, 20% of
+                    time_limit)); once it has a solution it stops after pump_patience rounds without a better
+                    one. Off by default so earlier benchmarks stay comparable.
+    cuts:           rounds of Gomory mixed-integer cuts at the root before branching (see cuts.py); 0 = off.
+                    cut_max caps cuts per round. Cuts are globally valid; slack ones are dropped afterwards.
+    presolve:       run HiGHS's MIP presolve first (see highs_presolve.py), solve the reduced problem, map the
+                    answer back. Off by default so earlier benchmarks stay comparable; the Pyomo plugin turns it on.
     reliability:    reliability branching: a variable's pseudocost counts as reliable after this many
                     observations in each direction; until then it is strong-branched.
     verify_top:     trnopt engine only: re-solve the children of trnopt's top-k candidates exactly with HiGHS
@@ -182,6 +224,14 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
     """
     if lp.integer is None or not lp.integer.any():
         raise ValueError("lp.integer marks no integer variables")
+    if presolve:
+        return _solve_presolved(lp, dict(
+            branching=branching, time_limit=time_limit, gap_tol=gap_tol, node_limit=node_limit,
+            max_candidates=max_candidates, strong_depth=strong_depth, backend=backend, slots=slots,
+            strong_tol=strong_tol, highs_workers=highs_workers, verify_top=verify_top, reliability=reliability,
+            strong_iters=strong_iters, learn_from_estimates=learn_from_estimates, pump=pump,
+            pump_rounds=pump_rounds, pump_time=pump_time, pump_patience=pump_patience, cuts=cuts, cut_max=cut_max,
+            verbose=verbose))
     rules = {"most_fractional": ("most_fractional", None), "pseudocost": ("pseudocost", None),
              "strong_highs": ("strong", "highs"), "strong_trnopt": ("strong", "trnopt"),
              "reliability_highs": ("reliability", "highs"), "reliability_trnopt": ("reliability", "trnopt")}
@@ -189,10 +239,19 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         raise ValueError(f"branching must be one of {sorted(rules)}")
     rule, engine = rules[branching]
     t0 = time.perf_counter()
+    cut_info = None
+    if cuts:
+        from .cuts import root_cuts
+        lp, cut_info = root_cuts(lp, rounds=cuts, max_cuts=cut_max, time_limit=min(60.0, 0.2 * time_limit),
+                                 verbose=verbose)
     be = Backend.preset(backend) if isinstance(backend, str) else backend
     ints = np.flatnonzero(lp.integer)
     times = dict(node_lp=0.0, strong=0.0, heuristic=0.0)
     counts = dict(node_lp=0, strong_lps=0, strong_nodes=0, verify_lps=0, top1_confirmed=0)
+    if cut_info is not None:
+        times["cuts"] = cut_info.seconds
+        counts.update(cut_rounds=cut_info.rounds, cuts_kept=cut_info.kept,
+                      root_bound_before_cuts=cut_info.bound_before, root_bound_after_cuts=cut_info.bound_after)
     incumbent, x_inc, inc_log = np.inf, None, []
     core = _NodeLP(lp)
     pool = None
@@ -232,6 +291,30 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         if st == "optimal" and feasible(xr):
             try_incumbent(xr, obj, "rounding")
         times["heuristic"] += time.perf_counter() - t
+
+    def run_pump(node, x):
+        """Batched feasibility pump from this node's LP solution (pump.py); feasible points become incumbents."""
+        from .pump import feasibility_pump
+        t = time.perf_counter()
+
+        def repair(r_ints):                            # fix the integers, solve exactly for the continuous ones
+            L, U = node.lower.copy(), node.upper.copy()
+            L[ints] = U[ints] = r_ints
+            st_, obj_, xr_, _, _ = core.solve(L, U, None)
+            counts["node_lp"] += 1
+            return (st_, obj_, xr_) if st_ == "optimal" and feasible(xr_) else None
+
+        budget = pump_time if pump_time is not None else min(60.0, 0.2 * time_limit)
+        pr = feasibility_pump(lp, x, backend=be, pumps=pump, rounds=pump_rounds,
+                              time_limit=max(0.0, min(budget, time_limit - elapsed())), lower=node.lower,
+                              upper=node.upper, repair=repair, stop_after=None, patience=pump_patience,
+                              verbose=verbose)
+        for _, xs in pr.solutions:
+            if feasible(xs):
+                try_incumbent(xs, float(lp.c @ xs), "feasibility pump")
+        times["pump"] = times.get("pump", 0.0) + time.perf_counter() - t
+        counts["pump_rounds"] = counts.get("pump_rounds", 0) + pr.rounds
+        counts["pump_solutions"] = counts.get("pump_solutions", 0) + len(pr.solutions)
 
     def solve_node(node):
         if node.lp_result is not None:
@@ -289,7 +372,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     return out
                 return get
 
-            r = solve_pdlp_stream(lp, len(down_up_p), min(slots, len(down_up_p)), lower=rows(node.lower, nlo),
+            r = solve_pdlp_stream(lp, len(down_up_p), be.batch_slots(len(down_up_p), slots), lower=rows(node.lower, nlo),
                                   upper=rows(node.upper, nup), x0=x, y0=y,
                                   opts=PDLPOptions(tol=strong_tol, backend=be, max_iters=strong_iters, time_limit=300))
             infeasible = np.array([s == "infeasible" for s in r.status[:-1]])
@@ -341,6 +424,8 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         if len(fractional) == 0:
             try_incumbent(x, obj, "integral LP")
             continue
+        if nodes == 1 and pump:
+            run_pump(node, x)
         if nodes == 1 or nodes % 20 == 0:
             heuristic(node, x)
         # gap check against the best open bound
