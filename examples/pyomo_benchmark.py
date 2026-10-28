@@ -13,7 +13,7 @@ Solvers (--solvers):
     trnopt     Pyomo's "trnopt" (this package; trnopt.pyomo_plugin), on --backend
 --repeat 2 runs each solver twice in one process: on Trainium the first solve includes compilation
 (--repeat-solvers trnopt repeats only that one).
-Each solver runs in its own process, killed --grace seconds past the time limit (a safety net: a
+Each solver runs in its own process, killed --grace seconds (+60 s for model building) past the time limit (a safety net: a
 misconfigured appsi_highs once ran 40+ minutes past a 120 s limit). Writes results/pyomo_<host>_<date>.csv as it goes.
 """
 
@@ -27,6 +27,8 @@ import platform
 import sys
 import time
 from pathlib import Path
+
+import trnopt  # noqa: F401  first: points the compile caches at TRNOPT_CACHE_DIR before torch loads (compile_cache.py)
 
 import numpy as np
 import pyomo.environ as pyo
