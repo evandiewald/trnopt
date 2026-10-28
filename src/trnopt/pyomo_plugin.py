@@ -24,6 +24,8 @@ Options (solver.options, or solve(..., options={...})), with defaults:
     presolve      True                   MIPs: HiGHS's MIP presolve before branch-and-bound (trnopt/highs_presolve.py)
     pump          16                     MIPs: parallel feasibility pumps at the root, batched on the backend (pump.py)
     cuts          5                      MIPs: rounds of Gomory mixed-integer cuts at the root (cuts.py); 0 = off
+    fj            True                   MIPs: Feasibility Jump first (fj.py, needs numba; skipped without it)
+    rins          True                   MIPs: RINS improvement sub-MIPs during the search
 Linear models only (linear objective and constraints); one active objective.
 
 The model is translated with Pyomo's own LinearStandardFormCompiler (mixed form, so each row keeps its
@@ -46,7 +48,7 @@ from .backend import Backend
 from .lp import LP
 
 DEFAULTS = dict(backend="cpu-float32", time_limit=600.0, mip_gap=1e-4, branching="reliability_trnopt",
-                slots=None, strong_iters=256, lp_tol=1e-6, presolve=True, pump=16, cuts=5)
+                slots=None, strong_iters=256, lp_tol=1e-6, presolve=True, pump=16, cuts=5, fj=True, rins=True)
 
 # trnopt status -> (Pyomo solver status, termination condition)
 _STATUS = {
@@ -178,7 +180,7 @@ class TrnoptSolver:
             slots = opts["slots"] or (128 if be.device == "cpu" else 1024)
             r = solve_mip(lp, opts["branching"], time_limit=opts["time_limit"], gap_tol=opts["mip_gap"],
                           backend=be, slots=slots, strong_iters=opts["strong_iters"], presolve=opts["presolve"],
-                          pump=opts["pump"], cuts=opts["cuts"], verbose=tee)
+                          pump=opts["pump"], cuts=opts["cuts"], fj=opts["fj"], rins=opts["rins"], verbose=tee)
             status, x, nodes, bound = r.status, r.x, r.nodes, r.bound
         else:
             from .pdlp import PDLPOptions, solve_pdlp

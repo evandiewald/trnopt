@@ -297,8 +297,12 @@ def test_nki_kernels_cached_per_layout():
     S = build_sell(K)
     assert make_sell_kernel(S, 4) is make_sell_kernel(build_sell(K.copy()), 4)
     assert make_sell_kernel(S, 4) is not make_sell_kernel(S, 8)
+    # different values, same layout: the same kernel (values are inputs, not baked in)
     K2 = sp.random(300, 500, density=0.02, random_state=2, format="csr")
-    assert make_sell_kernel(build_sell(K2), 4) is not make_sell_kernel(S, 4)
+    if build_sell(K2).widths == S.widths:
+        assert make_sell_kernel(build_sell(K2), 4) is make_sell_kernel(S, 4)
+    K3 = sp.random(300, 500, density=0.05, random_state=2, format="csr")
+    assert make_sell_kernel(build_sell(K3), 4) is not make_sell_kernel(S, 4)
 
 
 def test_solver_with_simulated_nki_kernel():

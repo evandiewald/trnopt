@@ -107,17 +107,24 @@ Why each restriction exists, and how we deal with it:
 - **Every new problem size means a recompile.** TorchNeuron doesn't support shapes that change, so
   each distinct problem size compiles once. On CPU that takes 1-20 s. It's fine for batches of
   same-size LPs (Phase 3), but expensive for one-off solves.
-- **Compiles are cached on disk, so a new process doesn't redo them.** Importing trnopt points
-  Inductor's cache and the Neuron compiler's cache (NEFFs, including NKI kernels) at one directory,
-  `TRNOPT_CACHE_DIR` (default `~/.cache/trnopt`). Both are keyed on the program, not on the LP, so
-  re-solving an instance or solving another one of the same size skips the compiler. Unlike PyTorch's
-  `/tmp` default, the cache survives reboots, and you can copy or share it (EFS) across instances.
-  It never overrides `TORCHINDUCTOR_CACHE_DIR` / `NEURON_COMPILE_CACHE_URL` if you set them;
-  `TRNOPT_CACHE_DIR=off` disables it, and `trnopt.compile_cache.clear()` empties it. Import
-  trnopt before torch, since the Neuron plugin may read its setting when torch loads. Emulated
-  Trainium on israel: first solve in a fresh process 4.6 s with a cold cache, 1.3 s warm (what's left
-  is tracing the step function, which runs every process). Within a process, NKI kernels are also
-  shared across solves of the same matrix layout.
+- **Compiles are cached on disk, so a new session doesn't redo them.** TorchNeuron keeps compiled
+  programs (NEFFs) in `/tmp` by default, which is wiped every time the instance stops, so each
+  session on a stop/start instance compiled everything again. Importing trnopt points TorchNeuron's
+  caches (`TORCH_NEURONX_NEFF_CACHE_DIR`, `TORCH_NEURONX_HLO_CACHE_DIR`), Inductor's
+  (`TORCHINDUCTOR_CACHE_DIR`) and the older XLA stack's (`NEURON_COMPILE_CACHE_URL`) at one
+  directory, `TRNOPT_CACHE_DIR` (default `~/.cache/trnopt`). They're keyed on the program, not the
+  LP, so re-solving an instance, or solving another of the same size, skips the compiler. You can
+  copy the directory to a new instance or share it on EFS. Variables you set yourself win;
+  `TRNOPT_CACHE_DIR=off` disables it and `trnopt.compile_cache.clear()` empties it. `import torch`
+  loads torch-neuronx, which reads these locations as it loads, so import trnopt first.
+  - Measured on trn1 (israel, first solve in a new process after wiping `/tmp` as a stop does):
+    dense K 37–46 s before, 10–12 s now; NKI kernel 20 s before, 10 s now. Of the remaining time,
+    ~7.5 s is starting the Neuron runtime (the first copy to the device), not compiling.
+  - NKI kernels: NKI's own cross-process cache (in `/var/tmp`) keys on the kernel's name and input
+    shapes, not on constants captured from the surrounding Python. Our kernel bakes in the matrix's
+    slice layout that way, so two matrices with equally sized tables could have shared a kernel. Each
+    kernel is now named after its layout. Within a process, kernels are also shared across solves of
+    the same layout.
 
 ### What Phase 1 measured (CPU, 640 fixed iterations)
 

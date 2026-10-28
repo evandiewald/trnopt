@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pyomo = ["pyomo>=6.9"]        # SolverFactory("trnopt") via `import trnopt.pyomo_plugin`
+heuristics = ["numba>=0.60"]  # Feasibility Jump (trnopt.fj)
 
 [project.scripts]
 trnopt-bench = "trnopt.bench:main"

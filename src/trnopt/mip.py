@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 
 import highspy
 import numpy as np
+import scipy.sparse as sp
 
 from .backend import Backend
 from .lp import LP
@@ -196,7 +197,8 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
               highs_workers: int = 1, verify_top: int = 0, reliability: int = 4, strong_iters: int = 256,
               learn_from_estimates: bool = True, presolve: bool = False,
               pump: int = 0, pump_rounds: int = 40, pump_time: float | None = None, pump_patience: int = 3,
-              cuts: int = 0, cut_max: int = 100, verbose: bool = False) -> MIPResult:
+              cuts: int = 0, cut_max: int = 100, fj: bool = False, fj_time: float | None = None,
+              rins: bool = False, rins_frac: float = 0.15, verbose: bool = False) -> MIPResult:
     """Branch-and-bound on lp (lp.integer marks the integer variables). See the module docstring.
 
     max_candidates: strong-branch on at most this many fractional variables (most fractional first);
@@ -213,6 +215,12 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     0 = off. pump_rounds / pump_time bound the effort (pump_time default: min(60 s, 20% of
                     time_limit)); once it has a solution it stops after pump_patience rounds without a better
                     one. Off by default so earlier benchmarks stay comparable.
+    fj:             run Feasibility Jump (fj.py; LP-free local search, CPU) before anything else, for a first
+                    incumbent on models whose root LP is slow. fj_time default: min(10 s, 5% of time_limit).
+    rins:           RINS improvement heuristic: fix the integer variables on which the node LP solution and
+                    the incumbent agree, solve the much smaller rest as a sub-MIP (this solver, pseudocost
+                    branching, short limit), keep it if better. At the root and then every 200 nodes while the
+                    incumbent keeps improving; at most rins_frac of the time limit in total.
     cuts:           rounds of Gomory mixed-integer cuts at the root before branching (see cuts.py); 0 = off.
                     cut_max caps cuts per round. Cuts are globally valid; slack ones are dropped afterwards.
     presolve:       run HiGHS's MIP presolve first (see highs_presolve.py), solve the reduced problem, map the
@@ -233,7 +241,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
             strong_tol=strong_tol, highs_workers=highs_workers, verify_top=verify_top, reliability=reliability,
             strong_iters=strong_iters, learn_from_estimates=learn_from_estimates, pump=pump,
             pump_rounds=pump_rounds, pump_time=pump_time, pump_patience=pump_patience, cuts=cuts, cut_max=cut_max,
-            verbose=verbose))
+            fj=fj, fj_time=fj_time, rins=rins, rins_frac=rins_frac, verbose=verbose))
     rules = {"most_fractional": ("most_fractional", None), "pseudocost": ("pseudocost", None),
              "strong_highs": ("strong", "highs"), "strong_trnopt": ("strong", "trnopt"),
              "reliability_highs": ("reliability", "highs"), "reliability_trnopt": ("reliability", "trnopt")}
@@ -241,6 +249,13 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         raise ValueError(f"branching must be one of {sorted(rules)}")
     rule, engine = rules[branching]
     t0 = time.perf_counter()
+    fj_res = None
+    if fj and lp.integer is not None and lp.integer.any():
+        try:
+            from .fj import feasibility_jump
+            fj_res = feasibility_jump(lp, time_limit=fj_time if fj_time is not None else min(10.0, 0.05 * time_limit))
+        except ImportError:
+            fj_res = None                              # numba not installed
     cut_info = None
     lp_orig = lp                                       # the pump works on the uncut model (sparser; cuts are implied)
     if cuts:
@@ -285,6 +300,52 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         Kx = lp.K @ x
         viol = np.where(np.arange(lp.m) < lp.m_eq, np.abs(Kx - lp.q), np.maximum(lp.q - Kx, 0))
         return bool(np.all(viol <= 1e-6 * (1 + np.abs(lp.q))))
+
+    if fj_res is not None:
+        times["fj"] = fj_res.seconds
+        counts["fj_solutions"] = len(fj_res.solutions)
+        for obj_, xs in fj_res.solutions:
+            if feasible(xs):
+                try_incumbent(xs, float(lp.c @ xs), "feasibility jump")
+                break                                  # sorted best first
+
+    rins_state = dict(spent=0.0, tried=set(), last_inc=np.inf, fails=0, next_at=1)
+
+    def run_rins(x):
+        """RINS: fix integers where LP and incumbent agree; solve the rest as a small sub-MIP with a cutoff."""
+        if x_inc is None:
+            return
+        budget = rins_frac * time_limit - rins_state["spent"]
+        tl = min(budget, 0.03 * time_limit, time_limit - elapsed())
+        if tl < 1.0:
+            return
+        agree = ints[np.abs(x[ints] - x_inc[ints]) < 1e-6]
+        if len(agree) < 0.3 * len(ints) or len(agree) == len(ints):
+            return                                     # too little fixed (sub-MIP as hard), or nothing left
+        key = hash(agree.tobytes())
+        if key in rins_state["tried"]:
+            return
+        rins_state["tried"].add(key)
+        rins_state["last_inc"] = incumbent
+        t = time.perf_counter()
+        import dataclasses
+        L, U = lp.lower.copy(), lp.upper.copy()
+        L[agree] = U[agree] = np.round(x_inc[agree])
+        # cutoff row: only strictly better solutions are of any use (c x <= incumbent - delta, as -c x >= ...)
+        delta = 1e-6 * max(1.0, abs(incumbent))
+        c_row = sp.csr_matrix(-lp.c.reshape(1, -1))
+        sub = dataclasses.replace(lp, K=sp.vstack([lp.K, c_row]).tocsr(), q=np.append(lp.q, -(incumbent - delta)),
+                                  lower=L, upper=U, name=lp.name + "_rins")
+        r = solve_mip(sub, "pseudocost", time_limit=tl, gap_tol=gap_tol, presolve=True, node_limit=500)
+        rins_state["spent"] += time.perf_counter() - t
+        times["rins"] = rins_state["spent"]
+        counts["rins_calls"] = counts.get("rins_calls", 0) + 1
+        if r.x is not None and feasible(r.x):
+            counts["rins_improved"] = counts.get("rins_improved", 0) + 1
+            try_incumbent(r.x, float(lp.c @ r.x), f"RINS ({len(agree)}/{len(ints)} fixed)")
+            rins_state["fails"] = 0
+        else:
+            rins_state["fails"] += 1                   # back off: each failure doubles the wait for the next try
 
     def heuristic(node, x):
         """Round the integer variables and repair the continuous ones with one LP (fix-and-solve)."""
@@ -435,6 +496,10 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
             run_pump(node, x)
         if nodes == 1 or nodes % 20 == 0:
             heuristic(node, x)
+        if rins and nodes >= rins_state["next_at"] and (nodes == 1 or incumbent < rins_state["last_inc"]
+                                                        or nodes % 1000 == 0):
+            run_rins(x)
+            rins_state["next_at"] = nodes + 200 * 2 ** rins_state["fails"]
         # gap check against the best open bound
         lb = min([node.bound] + [n.bound for n in heap])
         if incumbent < np.inf and (incumbent - lb) <= gap_tol * max(1.0, abs(incumbent)):
@@ -466,7 +531,22 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     cand = order[rank][unreliable[rank]]
                     if max_candidates is not None:
                         cand = cand[:max_candidates]
-            if len(cand):
+            first = None
+            if len(cand) and engine == "trnopt":
+                # time cap: root strong branching gets <= 10% of the time limit, later nodes <= 2% each, at the
+                # cost per strong LP measured so far (first call: at most 128 candidates, to measure it)
+                share = (0.10 if nodes == 1 else 0.02) * time_limit
+                if counts["strong_lps"] == 0 and len(cand) > 128:
+                    first = strong_scores(node, x, y, basis, cand[:128], depth)[0]   # measure the cost
+                rate = times["strong"] / max(1, counts["strong_lps"])              # seconds per strong LP
+                cap = len(cand) if counts["strong_lps"] == 0 else max(8, int(share / (2 * max(rate, 1e-6))))
+                if first is not None:
+                    cap = max(128, cap)
+                cand = cand[:cap]
+                if first is not None:
+                    rest = strong_scores(node, x, y, basis, cand[128:], depth)[0] if len(cand) > 128 else np.zeros(0)
+                    score, exact = np.concatenate([first, rest]), None
+            if len(cand) and not (engine == "trnopt" and first is not None):
                 score, exact = strong_scores(node, x, y, basis, cand, depth)
             if len(cand) and engine == "trnopt" and verify_top > 0 and len(cand) > 1:
                 # Screening: confirm trnopt's short list with exact HiGHS solves.

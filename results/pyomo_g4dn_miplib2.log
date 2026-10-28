@@ -1,3 +1,61 @@
 host g4dn.2xlarge-miplib2   trnopt backend cuda   solvers ['highs', 'trnopt']   time limit 120s   gap 0.0001
 
 chromaticindex512-7.mps.gz: 33791 rows x 36864 cols, 135156 nonzeros, 36864 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 4  bound 3  gap 2.5e-01     148.0 s
+ERROR: evaluating object as numeric value: x[0]
+        (object: <class 'pyomo.core.base.var.VarData'>)
+    No value for uninitialized VarData object x[0]
+ERROR: evaluating object as numeric value: obj
+        (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+    No value for uninitialized VarData object x[0]
+   trnopt (cuda)                maxTimeLimit     obj nan  bound nan  gap nan     140.0 s
+
+comp21-2idx.mps.gz: 14038 rows x 10863 cols, 57301 nonzeros, 10863 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 806  bound 38  gap 9.5e-01     121.2 s
+ERROR: evaluating object as numeric value: x[1887]
+        (object: <class 'pyomo.core.base.var.VarData'>)
+    No value for uninitialized VarData object x[1887]
+ERROR: evaluating object as numeric value: obj
+        (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+    No value for uninitialized VarData object x[1887]
+   trnopt (cuda)                maxTimeLimit     obj nan  bound nan  gap nan     122.0 s
+
+neos-4300652-rahue.mps.gz: 76992 rows x 33003 cols, 183616 nonzeros, 20900 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 11.9813  bound 0.02572  gap 1.0e+00     124.7 s
+ERROR: evaluating object as numeric value: x[12255]
+        (object: <class 'pyomo.core.base.var.VarData'>)
+    No value for uninitialized VarData object x[12255]
+ERROR: evaluating object as numeric value: obj
+        (object: <class 'pyomo.core.base.objective.ScalarObjective'>)
+    No value for uninitialized VarData object x[12255]
+   trnopt (cuda)                maxTimeLimit     obj nan  bound nan  gap nan     121.1 s
+
+neos-4954672-berkel.mps.gz: 1848 rows x 1533 cols, 8007 nonzeros, 630 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 2.6441e+06  bound 2.21041e+06  gap 1.6e-01     120.2 s
+   trnopt (cuda)                maxTimeLimit     obj 3.64561e+06  bound 1.72921e+06  gap 5.3e-01     120.1 s
+
+neos-911970.mps.gz: 107 rows x 888 cols, 3408 nonzeros, 840 integer
+   highs                        optimal          obj 54.76  bound 54.7547  gap 9.7e-05       9.7 s
+   trnopt (cuda)                maxTimeLimit     obj 115.91  bound 23.26  gap 8.0e-01     120.0 s
+
+neos-933966.mps.gz: 12047 rows x 31762 cols, 180618 nonzeros, 27982 integer
+   highs                        optimal          obj 318  bound 318  gap 0.0e+00      73.5 s
+   trnopt (cuda)                maxTimeLimit     obj 2365.01  bound 318  gap 8.7e-01     121.4 s
+
+nu25-pr12.mps.gz: 2313 rows x 5868 cols, 17712 nonzeros, 5868 integer
+   highs                        optimal          obj 53905  bound 53900  gap 9.3e-05       8.8 s
+   trnopt (cuda)                maxTimeLimit     obj 53940  bound 53757  gap 3.4e-03     120.1 s
+
+Wrote /home/ubuntu/trnopt/results/pyomo_g4dn.2xlarge-miplib2_2026-10-28.csv
