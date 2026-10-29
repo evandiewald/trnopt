@@ -1,0 +1,24 @@
+host mac-blog4   trnopt backend cpu-float32   solvers ['highs']   time limit 600s   gap 0.0001
+
+liu.mps.gz: 2178 rows x 1156 cols, 10626 nonzeros, 1089 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 1554  bound 560  gap 6.4e-01     600.0 s
+
+neos-3355120-tarago.mps.gz: 86633 rows x 7800 cols, 265500 nonzeros, 7800 integer
+   highs                        error: RuntimeError: A feasible solution was not found, so no solution can be loaded. If using the appsi.solvers.Highs in obj nan  bound nan  gap nan     600.9 s
+
+polygonpack4-7.mps.gz: 34529 rows x 10788 cols, 178591 nonzeros, 10774 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj -4.30714e+07  bound -7.53249e+07  gap 7.5e-01     600.7 s
+
+bts4-cta.mps.gz: 45350 rows x 75400 cols, 291904 nonzeros, 2260 integer
+WARNING: Loading a feasible but suboptimal solution. Please set
+load_solution=False and check results.termination_condition and
+results.found_feasible_solution() before loading a solution.
+   highs                        maxTimeLimit     obj 575551  bound 320598  gap 4.4e-01     601.4 s
+
+Wrote /Users/evan/Documents/code/trainium-optimization/results/pyomo_mac-blog4_2026-10-28.csv

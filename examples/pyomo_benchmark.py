@@ -52,7 +52,7 @@ def default_backend() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu-float32"
 
 
-def make_solver(name: str, time_limit: float, gap: float, backend: str):
+def make_solver(name: str, time_limit: float, gap: float, backend: str, trnopt_opts: dict | None = None):
     if name == "highs":
         opt = pyo.SolverFactory("appsi_highs")
         # HiGHS option names, passed straight to HiGHS. Not opt.config.time_limit: SolverFactory returns appsi's
@@ -71,7 +71,7 @@ def make_solver(name: str, time_limit: float, gap: float, backend: str):
         return opt
     if name == "trnopt":
         opt = pyo.SolverFactory("trnopt")
-        opt.options.update(backend=backend, time_limit=time_limit, mip_gap=gap)
+        opt.options.update(backend=backend, time_limit=time_limit, mip_gap=gap, **(trnopt_opts or {}))
         return opt
     raise ValueError(name)
 
@@ -97,17 +97,27 @@ def make_instance(spec):
     return (QUICK if a == "quick" else DEFAULT[len(QUICK):])[i]()
 
 
-def run_solver(spec, s, reps, time_limit, gap_tol, backend, out_q):
+def run_solver(spec, s, reps, time_limit, gap_tol, backend, out_q, trnopt_opts=None):
     """Worker process: solve one instance with one solver `reps` times, putting each result on out_q."""
     lp = make_instance(spec)
     for rep in range(reps):
         m = lp_to_pyomo(lp)                                    # building the model is the user's job: not timed
-        opt = make_solver(s, time_limit, gap_tol, backend)
+        opt = make_solver(s, time_limit, gap_tol, backend, trnopt_opts)
         t = time.perf_counter()
         try:
-            res = opt.solve(m)                                 # every plugin loads its solution into m
+            # Don't let the plugin load the solution itself: HiGHS (appsi) raises when the time limit hits
+            # with no feasible solution, and the bound it reached is lost with it. Load afterwards, if any.
+            res = opt.solve(m, load_solutions=(s == "trnopt"))
             wall = time.perf_counter() - t
             term = str(res.solver.termination_condition)
+            if s != "trnopt":
+                try:
+                    if len(res.solution) > 0:
+                        m.solutions.load_from(res)
+                    else:
+                        opt.load_vars()                    # appsi / direct interfaces keep it on the solver
+                except Exception:
+                    pass                                   # no feasible solution: objective stays nan
             try:
                 obj = pyo.value(m.obj)
             except Exception:
@@ -133,9 +143,19 @@ def main():
                     help="only these solvers get --repeat runs (default: all), e.g. --repeat-solvers trnopt")
     ap.add_argument("--grace", type=float, default=120.0,
                     help="seconds past the time limit before a solve is killed (a solver that ignores its limit)")
+    ap.add_argument("--trnopt-opt", nargs="*", default=[], metavar="KEY=VALUE",
+                    help="extra trnopt plugin options, e.g. --trnopt-opt dives=16 pump=0 (values parsed as Python literals)")
     ap.add_argument("--host", default=platform.node() or "host")
     args = ap.parse_args()
     backend = args.backend or default_backend()
+    import ast
+    trnopt_opts = {}
+    for kv in args.trnopt_opt:
+        k, v = kv.split("=", 1)
+        try:
+            trnopt_opts[k] = ast.literal_eval(v)
+        except (ValueError, SyntaxError):
+            trnopt_opts[k] = v
     solvers = args.solvers
     if solvers is None:
         solvers = ["highs", "trnopt"]
@@ -162,7 +182,7 @@ def main():
         for s in solvers:
             reps = args.repeat if args.repeat_solvers is None or s in args.repeat_solvers else 1
             q = ctx.Queue()
-            proc = ctx.Process(target=run_solver, args=(spec, s, reps, args.time_limit, args.gap, backend, q))
+            proc = ctx.Process(target=run_solver, args=(spec, s, reps, args.time_limit, args.gap, backend, q, trnopt_opts))
             proc.start()
             deadline = time.time() + reps * (args.time_limit + args.grace) + 60     # + model building
             got = 0

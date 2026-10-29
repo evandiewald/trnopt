@@ -1,0 +1,5 @@
+instance,rows,cols,nnz,solver,run,termination,objective,bound,gap,seconds,time_limit,gap_tol
+liu.mps.gz,2178,1156,10626,trnopt (neuron),1,maxTimeLimit,1717.4846515382817,560.0,0.6739417732214197,600.278,600.0,0.0001
+neos-3355120-tarago.mps.gz,86633,7800,265500,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,603.467,600.0,0.0001
+polygonpack4-7.mps.gz,34529,10788,178591,trnopt (neuron),1,maxTimeLimit,-17152821.090887688,-75324811.3090543,3.3913949145700624,600.474,600.0,0.0001
+bts4-cta.mps.gz,45350,75400,291904,trnopt (neuron),1,maxTimeLimit,nan,nan,nan,601.023,600.0,0.0001

@@ -73,6 +73,7 @@ INFEAS_STREAK = 3      # consecutive evaluations that must agree before declarin
 RAY_COS = 0.99         # ...and the drift direction must be this steady between checks (cosine similarity)
 STALL_GATE = 1e-4      # precision stalls are only declared below this relative error
 STALL_FRACTION = 2     # stall window = at least 1/STALL_FRACTION of the evaluations so far
+SAFE_GAP_TOL = 1e-2    # loose check of the always-valid dual bound at convergence (float32 noise: ~5e-3 seen)
 
 
 @dataclass
@@ -280,10 +281,19 @@ class _Problem:
         pobj = torch.dot(self.c, x)
         dobj = (torch.dot(self.q, y) + torch.dot(torch.where(near_lo, self.lower_or_0, 0.0), r_pos)
                 - torch.dot(torch.where(near_up, self.upper_or_0, 0.0), r_neg))
+        # A dual objective that is a valid lower bound for ANY y (y >= 0 on ">=" rows, which PDHG keeps):
+        # every reduced cost credited to its finite bound. Valid only if no reduced cost points at an
+        # infinite bound (dobj_unb). Checked loosely at convergence (see safe_gap_ok): it catches the
+        # "near bounds" dual objective above agreeing with a primal point that is far from optimal, which
+        # happens when objective coefficients span many orders of magnitude (bts4-cta: costs up to 1.75e7,
+        # PDLP "converged" at twice the true LP optimum).
+        dobj_safe = (torch.dot(self.q, y) + torch.dot(torch.where(self.lower_finite, self.lower_or_0, 0.0), r_pos)
+                     - torch.dot(torch.where(self.upper_finite, self.upper_or_0, 0.0), r_neg))
+        dobj_unb = torch.linalg.norm(torch.where(self.lower_finite, 0.0, r_pos) + torch.where(self.upper_finite, 0.0, r_neg))
         return torch.stack([
             torch.linalg.norm(viol * self.inv_dr), torch.linalg.norm(dual_viol * self.inv_dc),
             torch.linalg.norm(viol), torch.linalg.norm(dual_viol),
-            pobj, dobj,
+            pobj, dobj, dobj_safe, dobj_unb,
         ])
 
     def ray_stats(self, dx, dy, pdx, pdy, x, y) -> torch.Tensor:
@@ -337,15 +347,22 @@ class _Problem:
     # ---- turning those numbers into decisions (on the host, plain Python) ------------------
     def relative(self, st) -> tuple[float, float, float, float]:
         """(relative primal violation, relative dual violation, relative gap, primal objective)."""
-        p, d, _, _, pobj, dobj = st
+        p, d, _, _, pobj, dobj = st[:6]
         return (p / (1.0 + self.q_norm), d / (1.0 + self.c_norm),
                 abs(pobj - dobj) / (1.0 + abs(pobj) + abs(dobj)), pobj)
 
     @staticmethod
     def kkt(st, omega: float) -> float:
         """One number summarizing 'how far from optimal' -- used to decide when to restart."""
-        _, _, p, d, pobj, dobj = st
+        _, _, p, d, pobj, dobj = st[:6]
         return math.sqrt(omega * p * p + d * d / omega + (pobj - dobj) ** 2)
+
+    def safe_gap_ok(self, st, tol: float) -> bool:
+        """Loose check of the always-valid dual bound against the primal objective (see point_stats)."""
+        pobj, dobj_safe, dobj_unb = st[4], st[6], st[7]
+        if dobj_unb > tol * (1.0 + self.c_norm):
+            return True                                # bound not valid here: nothing to check
+        return (pobj - dobj_safe) / (1.0 + abs(pobj) + abs(dobj_safe)) <= max(SAFE_GAP_TOL, tol)
 
     def no_solution(self, rs, tol: float) -> str | None:
         """Is the recent drift a proof that the LP is infeasible or unbounded (up to tol)?"""
@@ -526,7 +543,7 @@ def _solve(lp: LP, opts: PDLPOptions, x0: np.ndarray | None = None, y0: np.ndarr
         Kx_avg, KTy_avg = P.mv.K(x_avg), P.mv.KT(y_avg)
         dx_now, dy_now = x - x_prev_eval, y - y_prev_eval
         stats = P.eval_stats(x, y, Kx, KTy, x_avg, y_avg, Kx_avg, KTy_avg, dx_now, dy_now, dx_prev, dy_prev).tolist()
-        finite, cur_st, avg_st, ray_st = stats[0], stats[1:7], stats[7:13], stats[13:23]
+        finite, cur_st, avg_st, ray_st = stats[0], stats[1:9], stats[9:17], stats[17:27]
         dx_prev, dy_prev = dx_now, dy_now
         if finite < 1.0 or not all(map(math.isfinite, stats)):
             status = "numerical_error"
@@ -535,7 +552,7 @@ def _solve(lp: LP, opts: PDLPOptions, x0: np.ndarray | None = None, y0: np.ndarr
         # Stop if either the current point or the running average is good enough.
         for cand, st in (((x, y, Kx, KTy), cur_st), ((x_avg, y_avg, Kx_avg, KTy_avg), avg_st)):
             rp, rd, gap, _ = P.relative(st)
-            if rp <= opts.tol and rd <= opts.tol and gap <= opts.tol:
+            if rp <= opts.tol and rd <= opts.tol and gap <= opts.tol and P.safe_gap_ok(st, opts.tol):
                 status, best, best_stats = "optimal", cand, st
                 break
         if status == "optimal":

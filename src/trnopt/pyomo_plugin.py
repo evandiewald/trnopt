@@ -26,6 +26,9 @@ Options (solver.options, or solve(..., options={...})), with defaults:
     cuts          5                      MIPs: rounds of Gomory mixed-integer cuts at the root (cuts.py); 0 = off
     fj            True                   MIPs: Feasibility Jump first (fj.py, needs numba; skipped without it)
     rins          True                   MIPs: RINS improvement sub-MIPs during the search
+    dives         0                      MIPs: parallel LP-guided dives at the root, batched on the backend (dive.py)
+    local_search  True                   MIPs: improve the root incumbent by local search (fj.py; needs numba)
+    trivial       True                   MIPs: all-lower / all-upper / all-zero integers at the root if nothing else found one
 Linear models only (linear objective and constraints); one active objective.
 
 The model is translated with Pyomo's own LinearStandardFormCompiler (mixed form, so each row keeps its
@@ -48,7 +51,7 @@ from .backend import Backend
 from .lp import LP
 
 DEFAULTS = dict(backend="cpu-float32", time_limit=600.0, mip_gap=1e-4, branching="reliability_trnopt",
-                slots=None, strong_iters=256, lp_tol=1e-6, presolve=True, pump=16, cuts=5, fj=True, rins=True)
+                slots=None, strong_iters=256, lp_tol=1e-6, presolve=True, pump=16, cuts=5, fj=True, rins=True, dives=0, local_search=True, trivial=True)
 
 # trnopt status -> (Pyomo solver status, termination condition)
 _STATUS = {
@@ -180,7 +183,7 @@ class TrnoptSolver:
             slots = opts["slots"] or (128 if be.device == "cpu" else 1024)
             r = solve_mip(lp, opts["branching"], time_limit=opts["time_limit"], gap_tol=opts["mip_gap"],
                           backend=be, slots=slots, strong_iters=opts["strong_iters"], presolve=opts["presolve"],
-                          pump=opts["pump"], cuts=opts["cuts"], fj=opts["fj"], rins=opts["rins"], verbose=tee)
+                          pump=opts["pump"], cuts=opts["cuts"], fj=opts["fj"], rins=opts["rins"], dives=opts["dives"], local_search=opts["local_search"], trivial=opts["trivial"], verbose=tee)
             status, x, nodes, bound = r.status, r.x, r.nodes, r.bound
         else:
             from .pdlp import PDLPOptions, solve_pdlp
@@ -209,18 +212,20 @@ class TrnoptSolver:
         obj = info.objectives[0]
         sense_min = obj.sense == minimize
         have_x = x is not None and np.all(np.isfinite(x))
+        # bound is in trnopt's (minimization) sense, without the constant offset Pyomo kept apart. Reported
+        # whether or not a solution was found (a time limit with no incumbent still has a bound).
+        b = None if bound is None or not np.isfinite(bound) else float(bound) + float(info.c_offset[0])
+        if b is not None:
+            if sense_min:
+                results.problem.lower_bound = b
+            else:
+                results.problem.upper_bound = -b
         if have_x and load_solutions:
             for v, val in zip(info.columns, x):
                 v.set_value(round(float(val)) if v.is_integer() else float(val), skip_validation=True)
             objval = value(obj)                         # in the model's own sense, offset included
-            # bound is in trnopt's (minimization) sense, without the constant offset Pyomo kept apart
-            b = None if bound is None or not np.isfinite(bound) else float(bound) + float(info.c_offset[0])
             if sense_min:
                 results.problem.upper_bound = objval
-                if b is not None:
-                    results.problem.lower_bound = b
             else:
                 results.problem.lower_bound = objval
-                if b is not None:
-                    results.problem.upper_bound = -b
         return results

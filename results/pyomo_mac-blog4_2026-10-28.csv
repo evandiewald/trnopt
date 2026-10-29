@@ -1,0 +1,5 @@
+instance,rows,cols,nnz,solver,run,termination,objective,bound,gap,seconds,time_limit,gap_tol
+liu.mps.gz,2178,1156,10626,highs,1,maxTimeLimit,1553.999999,560.0,0.6396396394077475,600.038,600.0,0.0001
+neos-3355120-tarago.mps.gz,86633,7800,265500,highs,1,"error: RuntimeError: A feasible solution was not found, so no solution can be loaded. If using the appsi.solvers.Highs in",nan,nan,nan,600.891,600.0,0.0001
+polygonpack4-7.mps.gz,34529,10788,178591,highs,1,maxTimeLimit,-43071413.64430136,-75324937.30891874,0.7488382882200743,600.673,600.0,0.0001
+bts4-cta.mps.gz,45350,75400,291904,highs,1,maxTimeLimit,575551.3401729664,320598.38216675504,0.44297170419165754,601.378,600.0,0.0001

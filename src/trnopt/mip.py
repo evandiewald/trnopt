@@ -198,9 +198,11 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
               backend: str | Backend = "cpu-float32", slots: int = 128, strong_tol: float = 1e-4,
               highs_workers: int = 1, verify_top: int = 0, reliability: int = 4, strong_iters: int = 256,
               learn_from_estimates: bool = True, presolve: bool = False,
-              pump: int = 0, pump_rounds: int = 40, pump_time: float | None = None, pump_patience: int = 3,
+              pump: int = 0, pump_rounds: int = 1_000_000, pump_time: float | None = None, pump_patience: int = 5,
               cuts: int = 0, cut_max: int = 100, fj: bool = False, fj_time: float | None = None,
-              rins: bool = False, rins_frac: float = 0.15, verbose: bool = False) -> MIPResult:
+              rins: bool = False, rins_frac: float = 0.15, dives: int = 0, dive_time: float | None = None,
+              local_search: bool = False, ls_time: float | None = None, trivial: bool = False,
+              verbose: bool = False) -> MIPResult:
     """Branch-and-bound on lp (lp.integer marks the integer variables). See the module docstring.
 
     max_candidates: strong-branch on at most this many fractional variables (most fractional first);
@@ -214,11 +216,20 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
                     usual practice) we stop early and score from the estimate. 256 picked the same variable
                     as exact scores on every test family; full convergence cost ~10x more for no gain.
     pump:           number of parallel feasibility pumps to run at the root (see pump.py), batched on `backend`;
-                    0 = off. pump_rounds / pump_time bound the effort (pump_time default: min(60 s, 20% of
-                    time_limit)); once it has a solution it stops after pump_patience rounds without a better
-                    one. Off by default so earlier benchmarks stay comparable.
+                    0 = off. pump_rounds / pump_time bound the effort (pump_time default: 40% of time_limit);
+                    once it has a solution it stops after pump_patience rounds without a better one. With
+                    numba, each round's closest roundings are repaired by Feasibility Jump and cycles broken by
+                    it (cuOpt's extended pump; see pump.py). Off by default so earlier benchmarks stay comparable.
     fj:             run Feasibility Jump (fj.py; LP-free local search, CPU) before anything else, for a first
                     incumbent on models whose root LP is slow. fj_time default: min(10 s, 5% of time_limit).
+    dives:          number of LP-guided dives run in parallel at the root (dive.py), their LPs batched on
+                    `backend`; 0 = off. dive_time default: min(60 s, 10% of time_limit).
+    trivial:        at the root, if nothing has found a solution yet: integers all at their lower bounds, all
+                    at their upper bounds, all at 0, each with an exact LP for the continuous variables.
+    local_search:   after the root heuristics, improve the incumbent by local search (fj.py improve(): lift
+                    moves that stay feasible, breakthrough moves repaired by Feasibility Jump under an objective
+                    cutoff; cuOpt's Local-MIP move types, on the CPU). ls_time default: 20% of time_limit; stops
+                    early after 30% of that without an improvement.
     rins:           RINS improvement heuristic: fix the integer variables on which the node LP solution and
                     the incumbent agree, solve the much smaller rest as a sub-MIP (this solver, pseudocost
                     branching, short limit), keep it if better. At the root and then every 200 nodes while the
@@ -243,7 +254,9 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
             strong_tol=strong_tol, highs_workers=highs_workers, verify_top=verify_top, reliability=reliability,
             strong_iters=strong_iters, learn_from_estimates=learn_from_estimates, pump=pump,
             pump_rounds=pump_rounds, pump_time=pump_time, pump_patience=pump_patience, cuts=cuts, cut_max=cut_max,
-            fj=fj, fj_time=fj_time, rins=rins, rins_frac=rins_frac, verbose=verbose))
+            fj=fj, fj_time=fj_time, rins=rins, rins_frac=rins_frac, dives=dives, dive_time=dive_time,
+            local_search=local_search, ls_time=ls_time, trivial=trivial,
+            verbose=verbose))
     rules = {"most_fractional": ("most_fractional", None), "pseudocost": ("pseudocost", None),
              "strong_highs": ("strong", "highs"), "strong_trnopt": ("strong", "trnopt"),
              "reliability_highs": ("reliability", "highs"), "reliability_trnopt": ("reliability", "trnopt")}
@@ -290,6 +303,8 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
 
     if static and pump:
         warm_start(lp, pump)                           # feasibility_pump runs `pump` slots on the uncut model
+    if static and dives:
+        warm_start(lp, dives)                          # batched_dives: `dives` slots, same model (shared if = pump)
     fj_res = None
     if fj and lp.integer is not None and lp.integer.any():
         try:
@@ -439,7 +454,7 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
             counts["node_lp"] += 1
             return (st_, obj_, xr_) if st_ == "optimal" and feasible(xr_) else None
 
-        budget = pump_time if pump_time is not None else min(60.0, 0.2 * time_limit)
+        budget = pump_time if pump_time is not None else 0.4 * time_limit
         pr = feasibility_pump(lp_orig, x, backend=be, pumps=pump, rounds=pump_rounds,
                               time_limit=max(0.0, min(budget, time_limit - elapsed())), lower=node.lower,
                               upper=node.upper, repair=repair, stop_after=None, patience=pump_patience,
@@ -450,6 +465,74 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         times["pump"] = times.get("pump", 0.0) + time.perf_counter() - t
         counts["pump_rounds"] = counts.get("pump_rounds", 0) + pr.rounds
         counts["pump_solutions"] = counts.get("pump_solutions", 0) + len(pr.solutions)
+
+    def run_dives(node, x):
+        """Batched LP-guided dives from this node's LP solution (dive.py), their LPs batched on `backend`."""
+        from .dive import batched_dives
+        if static and not warm_ready(time_limit - elapsed()):
+            return
+        t = time.perf_counter()
+
+        def repair(r_ints):
+            L, U = node.lower.copy(), node.upper.copy()
+            L[ints] = U[ints] = r_ints
+            st_, obj_, xr_, _, _ = core.solve(L, U, None)
+            counts["node_lp"] += 1
+            return (st_, obj_, xr_) if st_ == "optimal" and feasible(xr_) else None
+
+        budget = dive_time if dive_time is not None else min(60.0, 0.1 * time_limit)
+        dr = batched_dives(lp_orig, x, backend=be, dives=dives, lower=node.lower, upper=node.upper,
+                           time_limit=max(0.0, min(budget, time_limit - elapsed())), repair=repair,
+                           incumbent=x_inc, verbose=verbose)
+        for _, xs in dr.solutions:
+            if feasible(xs):
+                try_incumbent(xs, float(lp.c @ xs), "batched dives")
+        times["dives"] = times.get("dives", 0.0) + time.perf_counter() - t
+        times["dive_lp"] = times.get("dive_lp", 0.0) + dr.lp_seconds
+        counts["dive_rounds"] = counts.get("dive_rounds", 0) + dr.rounds
+        counts["dive_solutions"] = counts.get("dive_solutions", 0) + len(dr.solutions)
+
+    def run_local_search(node):
+        """Improve the incumbent by local search (fj.FeasibilityJump.improve: lift + breakthrough moves, CPU)."""
+        if x_inc is None:
+            return
+        try:
+            from .fj import FeasibilityJump
+        except ImportError:
+            return
+        t = time.perf_counter()
+        budget = ls_time if ls_time is not None else 0.2 * time_limit
+        fjs = FeasibilityJump(lp_orig)
+        lr = fjs.improve(x_inc, time_limit=max(0.0, min(budget, time_limit - elapsed())), lower=node.lower,
+                         upper=node.upper, verbose=verbose)
+        for _, xs in lr.solutions:
+            if feasible(xs):
+                try_incumbent(xs, float(lp.c @ xs), "local search")
+                break                                  # sorted best first
+        times["local_search"] = times.get("local_search", 0.0) + time.perf_counter() - t
+        counts["ls_improvements"] = counts.get("ls_improvements", 0) + len(lr.solutions)
+
+    def run_trivial(node):
+        """Trivial heuristic: every integer variable at its lower bound, then at its upper bound (and at 0 if
+        that differs), continuous variables solved exactly. Cheap insurance for models whose LP relaxation says
+        nothing useful (bts4-cta: every binary is 0.5 at the root, any rounding of it is infeasible, but all-0
+        and all-1 are feasible)."""
+        t = time.perf_counter()
+        L0, U0 = node.lower[ints], node.upper[ints]
+        tried = []
+        for vals in (L0, U0, np.clip(0.0, L0, U0)):
+            if not np.all(np.isfinite(vals)) or any(np.array_equal(vals, v) for v in tried):
+                continue
+            tried.append(vals)
+            if elapsed() > time_limit:
+                break
+            L, U = node.lower.copy(), node.upper.copy()
+            L[ints] = U[ints] = vals
+            st_, obj_, xr_, _, _ = core.solve(L, U, None)
+            counts["node_lp"] += 1
+            if st_ == "optimal" and feasible(xr_):
+                try_incumbent(xr_, obj_, "trivial")
+        times["trivial"] = times.get("trivial", 0.0) + time.perf_counter() - t
 
     def solve_node(node):
         if node.lp_result is not None:
@@ -562,8 +645,14 @@ def solve_mip(lp: LP, branching: str = "strong_trnopt", time_limit: float = 600.
         if len(fractional) == 0:
             try_incumbent(x, obj, "integral LP")
             continue
+        if nodes == 1 and trivial and x_inc is None:
+            run_trivial(node)
         if nodes == 1 and pump:
             run_pump(node, x)
+        if nodes == 1 and dives:
+            run_dives(node, x)
+        if nodes == 1 and local_search:
+            run_local_search(node)
         if nodes == 1 or nodes % 20 == 0:
             heuristic(node, x)
         if rins and nodes >= rins_state["next_at"] and (nodes == 1 or incumbent < rins_state["last_inc"]

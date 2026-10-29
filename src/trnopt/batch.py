@@ -66,7 +66,7 @@ import torch
 
 from .backend import Backend, MatVec
 from .lp import LP
-from .pdlp import (INFEAS_STREAK, INFEAS_WARMUP, RAY_COS, STALL_FRACTION, STALL_GATE, PDLPOptions,
+from .pdlp import (INFEAS_STREAK, INFEAS_WARMUP, RAY_COS, SAFE_GAP_TOL, STALL_FRACTION, STALL_GATE, PDLPOptions,
                    _operator_norm, _scale)
 
 
@@ -263,7 +263,7 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
     iters_since, restarts_s, streak = np.zeros(B, np.int64), np.zeros(B, np.int64), np.zeros(B, np.int64)
     last_verdict = np.full(B, None, dtype=object)
     c_norm, q_norm, c_smax, q_smax = np.zeros(B), np.zeros(B), np.zeros(B), np.zeros(B)
-    best_st = np.zeros((6, B))
+    best_st = np.zeros((8, B))
 
     # ---- per-LP results ------------------------------------------------------------------------
     R_status = np.array(["iteration_limit"] * N, dtype=object)
@@ -283,12 +283,17 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         return torch.as_tensor(mask_np, device=be.device)[None, :]
 
     def relative(st, cols=slice(None)):
-        p, d, _, _, pobj, dobj = st
+        p, d, _, _, pobj, dobj = st[:6]
         return (p / (1 + q_norm[cols]), d / (1 + c_norm[cols]),
                 np.abs(pobj - dobj) / (1 + np.abs(pobj) + np.abs(dobj)), pobj)
 
+    def safe_ok(st):
+        pobj, ds, du = st[4], st[6], st[7]
+        valid = du <= opts.tol * (1 + c_norm)
+        return ~valid | ((pobj - ds) / (1 + np.abs(pobj) + np.abs(ds)) <= max(SAFE_GAP_TOL, opts.tol))
+
     def kkt(st, om):
-        _, _, p, d, pobj, dobj = st
+        _, _, p, d, pobj, dobj = st[:6]
         return np.sqrt(om * p * p + d * d / om + (pobj - dobj) ** 2)
 
     # ---- loading LPs into slots: full-width masked updates, one fixed-shape program ----------
@@ -367,7 +372,7 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         S = eval_stats(x, y, Kx, KTy, xa, ya, Kxa, KTya, dx_now, dy_now, dx_prev, dy_prev,
                        c_t, q_t, lo_fin, up_fin, lo0, up0).cpu().double().numpy()
         dx_prev, dy_prev = dx_now, dy_now
-        finite, cur, avg, ray = S[0], S[1:7], S[7:13], S[13:23]
+        finite, cur, avg, ray = S[0], S[1:9], S[9:17], S[17:27]
 
         status = np.full(B, None, dtype=object)
         bad = running & ((finite < 1) | ~np.isfinite(S).all(axis=0))
@@ -376,8 +381,8 @@ def _stream(lp: LP, N: int, B: int, g: dict, opts: PDLPOptions, stop_on_stall: b
         # Converged? (current point or running average)
         rp_c, rd_c, g_c, _ = relative(cur)
         rp_a, rd_a, g_a, _ = relative(avg)
-        ok_c = (rp_c <= opts.tol) & (rd_c <= opts.tol) & (g_c <= opts.tol)
-        ok_a = (rp_a <= opts.tol) & (rd_a <= opts.tol) & (g_a <= opts.tol)
+        ok_c = (rp_c <= opts.tol) & (rd_c <= opts.tol) & (g_c <= opts.tol) & safe_ok(cur)
+        ok_a = (rp_a <= opts.tol) & (rd_a <= opts.tol) & (g_a <= opts.tol) & safe_ok(avg)
         newly_opt = running & ~bad & (ok_c | ok_a)
         status[newly_opt] = "optimal"
 
@@ -538,7 +543,11 @@ def _point_stats(ctx, x, y, Kx, KTy, c_t, q_t, lo_fin, up_fin, lo0, up0):
     pobj = (c_t * x).sum(0)
     dobj = (q_t * y).sum(0) + (torch.where(near_lo, lo0, 0.0) * rp).sum(0) - (torch.where(near_up, up0, 0.0) * rn).sum(0)
     nrm = lambda v: torch.linalg.norm(v, dim=0)
-    return torch.stack([nrm(viol * ctx.inv_dr_t), nrm(dviol * ctx.inv_dc_t), nrm(viol), nrm(dviol), pobj, dobj])
+    # always-valid dual bound and its validity check (see pdlp._Problem.point_stats)
+    dobj_safe = (q_t * y).sum(0) + (torch.where(lo_fin, lo0, 0.0) * rp).sum(0) - (torch.where(up_fin, up0, 0.0) * rn).sum(0)
+    dobj_unb = nrm(torch.where(lo_fin, 0.0, rp) + torch.where(up_fin, 0.0, rn))
+    return torch.stack([nrm(viol * ctx.inv_dr_t), nrm(dviol * ctx.inv_dc_t), nrm(viol), nrm(dviol), pobj, dobj,
+                        dobj_safe, dobj_unb])
 
 
 def _ray_stats(ctx, dx, dy, pdx, pdy, x, y, c_t, q_t, lo_fin, up_fin, lo0, up0):
@@ -560,7 +569,7 @@ def _ray_stats(ctx, dx, dy, pdx, pdy, x, y, c_t, q_t, lo_fin, up_fin, lo0, up0):
 
 
 def _eval_stats(ctx, x, y, Kx, KTy, xa, ya, Kxa, KTya, dx, dy, pdx, pdy, c_t, q_t, lo_fin, up_fin, lo0, up0):
-    """Per-slot measurements, all returned in one (23, B) tensor."""
+    """Per-slot measurements, all returned in one (27, B) tensor."""
     d = (c_t, q_t, lo_fin, up_fin, lo0, up0)
     finite = (torch.isfinite(x).all(0) & torch.isfinite(y).all(0)).to(x.dtype)[None, :]
     return torch.cat([finite, _point_stats(ctx, x, y, Kx, KTy, *d), _point_stats(ctx, xa, ya, Kxa, KTya, *d),
